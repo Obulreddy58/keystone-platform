@@ -1,0 +1,64 @@
+# -----------------------------------------------------------------------------
+# Vector Store: {{ store_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Engine: {{ engine }} | Dimensions: {{ dimensions }} | Metric: {{ distance_metric }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//vector-store?ref={{ iac_template_ref }}"
+}
+
+{% if existing_vpc_id %}
+inputs = {
+  name            = "{{ store_name }}"
+  engine          = "{{ engine }}"
+  dimensions      = {{ dimensions }}
+  distance_metric = "{{ distance_metric }}"
+  instance_class  = "{{ instance_class }}"
+
+  vpc_id = "{{ existing_vpc_id }}"
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    ManagedBy   = "keystone"
+    Service     = "vector-store"
+    CostCenter  = "{{ cost_center }}"
+    CreatedBy   = "{{ requester_email }}"
+  }
+}
+{% else %}
+dependency "vpc" {
+  config_path = "../vpc"
+
+  mock_outputs = {
+    vpc_id              = "vpc-00000000000000000"
+    database_subnet_ids = ["subnet-aaa", "subnet-bbb", "subnet-ccc"]
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+inputs = {
+  name            = "{{ store_name }}"
+  engine          = "{{ engine }}"
+  dimensions      = {{ dimensions }}
+  distance_metric = "{{ distance_metric }}"
+  instance_class  = "{{ instance_class }}"
+
+  vpc_id              = dependency.vpc.outputs.vpc_id
+  database_subnet_ids = dependency.vpc.outputs.database_subnet_ids
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    ManagedBy   = "keystone"
+    Service     = "vector-store"
+    CostCenter  = "{{ cost_center }}"
+    CreatedBy   = "{{ requester_email }}"
+  }
+}
+{% endif %}

@@ -1,0 +1,64 @@
+replicaCount: 2
+
+image:
+  repository: ""   # your ECR repo: 123456789012.dkr.ecr.us-east-1.amazonaws.com/infra-self-service
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: ""  # ACM cert ARN
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+  host: self-service.internal.yourcompany.com
+
+# Environment variables — reference Kubernetes secrets
+env:
+  SELF_SERVICE_JIRA_BASE_URL: ""
+  SELF_SERVICE_IAC_GITHUB_ORG: "iac"
+  SELF_SERVICE_IAC_REPO_PREFIX: "terraform-aws"
+  SELF_SERVICE_IAC_TEMPLATE_REF: "main"
+  SELF_SERVICE_IAC_TEMPLATE_DIR: "template"
+  SELF_SERVICE_DEFAULT_AWS_REGION: "us-east-1"
+  SELF_SERVICE_DEBUG: "false"
+
+# Sensitive values from External Secrets (ESO pulls from AWS Secrets Manager)
+secretName: infra-self-service-secrets
+# The secret should contain:
+#   SELF_SERVICE_JIRA_API_TOKEN
+#   SELF_SERVICE_JIRA_USER_EMAIL
+#   SELF_SERVICE_JIRA_WEBHOOK_SECRET
+#   SELF_SERVICE_GITHUB_TOKEN
+#   SELF_SERVICE_DATABASE_URL          (e.g. postgresql+asyncpg://user:pass@host:5432/selfservice)
+
+# Database — use an external RDS instance or in-cluster PostgreSQL
+# Set SELF_SERVICE_DATABASE_URL in the secret above
+database:
+  # If true, deploy an in-cluster PostgreSQL (for dev/testing only)
+  # For production, use RDS and set the URL in the secret
+  inCluster: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector: {}
+tolerations: []

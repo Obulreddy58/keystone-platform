@@ -1,0 +1,53 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SELF_SERVICE_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/selfservice"
+      SELF_SERVICE_JIRA_BASE_URL: ""
+      SELF_SERVICE_JIRA_API_TOKEN: ""
+      SELF_SERVICE_JIRA_USER_EMAIL: ""
+      SELF_SERVICE_JIRA_WEBHOOK_SECRET: ""
+      SELF_SERVICE_GITHUB_TOKEN: "${SELF_SERVICE_GITHUB_TOKEN}"
+      SELF_SERVICE_IAC_GITHUB_ORG: "Obulreddy58"
+      SELF_SERVICE_IAC_REPO_PREFIX: "keystone-modules"
+      SELF_SERVICE_DEFAULT_AWS_REGION: "eu-central-1"
+      SELF_SERVICE_AWS_ACCOUNT_ID: "751106206844"
+      SELF_SERVICE_AWS_ROLE_ARN: "arn:aws:iam::751106206844:role/GithubActionsRole"
+      SELF_SERVICE_JWT_SECRET: "ux5Yi8V8wU/8rShF7BHeKM0Etp2zOAQ2rbRJcHJRf/xq4YqZqaLds6zfU8XA3vWI"
+      SELF_SERVICE_DEBUG: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: selfservice
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

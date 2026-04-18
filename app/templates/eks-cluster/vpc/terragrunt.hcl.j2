@@ -1,0 +1,33 @@
+# -----------------------------------------------------------------------------
+# VPC for {{ cluster_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}-vpc.git//?ref={{ iac_template_ref }}"
+}
+
+inputs = {
+  name     = "{{ cluster_name }}"
+  vpc_cidr = "{{ vpc_cidr }}"
+
+  # 3 AZs
+  availability_zones = ["{{ aws_region }}a", "{{ aws_region }}b", "{{ aws_region }}c"]
+
+  private_subnet_cidrs  = [cidrsubnet("{{ vpc_cidr }}", 4, 0), cidrsubnet("{{ vpc_cidr }}", 4, 1), cidrsubnet("{{ vpc_cidr }}", 4, 2)]
+  public_subnet_cidrs   = [cidrsubnet("{{ vpc_cidr }}", 4, 3), cidrsubnet("{{ vpc_cidr }}", 4, 4), cidrsubnet("{{ vpc_cidr }}", 4, 5)]
+  database_subnet_cidrs = [cidrsubnet("{{ vpc_cidr }}", 4, 6), cidrsubnet("{{ vpc_cidr }}", 4, 7), cidrsubnet("{{ vpc_cidr }}", 4, 8)]
+
+  enable_nat_gateway  = true
+  {% if environment == "prod" %}
+  single_nat_gateway  = false
+  {% else %}
+  single_nat_gateway  = true
+  {% endif %}
+
+  enable_flow_logs    = true
+}

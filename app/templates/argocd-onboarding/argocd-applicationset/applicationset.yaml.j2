@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: {{ project_name }}
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                {% for env in environments %}
+                - env: {{ env }}
+                {% endfor %}
+          - list:
+              elements:
+                {% for svc in services %}
+                - service: {{ svc }}
+                {% endfor %}
+  template:
+    metadata:
+      name: "{{ '{{' }}.env{{ '}}' }}-{{ '{{' }}.service{{ '}}' }}"
+      labels:
+        team: {{ team_name }}
+        project: {{ project_name }}
+        env: "{{ '{{' }}.env{{ '}}' }}"
+        service: "{{ '{{' }}.service{{ '}}' }}"
+    spec:
+      project: {{ project_name }}
+      sources:
+        - repoURL: "https://github.com/{{ github_group }}/{{ github_repo }}.git"
+          targetRevision: HEAD
+          path: "charts/{{ '{{' }}.service{{ '}}' }}"
+          helm:
+            valueFiles:
+              - "../../values/{{ '{{' }}.env{{ '}}' }}/{{ '{{' }}.service{{ '}}' }}.yaml"
+      destination:
+        server: "{{ cluster_endpoint }}"
+        namespace: "{{ namespace }}-{{ '{{' }}.env{{ '}}' }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+        retry:
+          limit: 3
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m

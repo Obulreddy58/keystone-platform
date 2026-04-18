@@ -1,0 +1,31 @@
+# -----------------------------------------------------------------------------
+# Data Access: {{ access_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Target: {{ target_resource_type }} ({{ access_level }})
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//data-access-iam?ref={{ iac_template_ref }}"
+}
+
+inputs = {
+  access_name          = "{{ access_name }}"
+  target_resource_type = "{{ target_resource_type }}"
+  target_resource_arn  = "{{ target_resource_arn }}"
+  principal_arns       = {{ principal_arns | tojson }}
+  access_level         = "{{ access_level }}"
+  enable_cross_account = {{ enable_cross_account | lower }}
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    ManagedBy   = "keystone"
+    Service     = "data-access"
+    CostCenter  = "{{ cost_center }}"
+    CreatedBy   = "{{ requester_email }}"
+  }
+}

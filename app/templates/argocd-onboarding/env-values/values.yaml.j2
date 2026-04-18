@@ -1,0 +1,47 @@
+# {{ environment }} overrides for {{ service_name }}
+# Helm deep-merges these on top of charts/{{ service_name }}/values.yaml
+
+image:
+  tag: "{{ environment }}-latest"
+
+{% if environment == "prod" %}
+replicaCount: 3
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 15
+  targetCPUUtilizationPercentage: 70
+{% elif environment == "staging" %}
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+{% else %}
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+{% endif %}
+
+env:
+  - name: APP_ENV
+    value: "{{ environment }}"

@@ -1,0 +1,82 @@
+# -----------------------------------------------------------------------------
+# EKS Addons for {{ cluster_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Operators: ArgoCD, ALB Controller, Karpenter, ESO, cert-manager
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//eks-addons?ref={{ iac_template_ref }}"
+}
+
+generate "helm_provider" {
+  path      = "helm_provider.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<-EOF
+    data "aws_eks_cluster_auth" "this" {
+      name = var.cluster_name
+    }
+
+    provider "helm" {
+      kubernetes {
+        host                   = var.cluster_endpoint
+        cluster_ca_certificate = base64decode(var.cluster_certificate_authority_data)
+        token                  = data.aws_eks_cluster_auth.this.token
+      }
+    }
+
+    provider "kubectl" {
+      host                   = var.cluster_endpoint
+      cluster_ca_certificate = base64decode(var.cluster_certificate_authority_data)
+      token                  = data.aws_eks_cluster_auth.this.token
+      load_config_file       = false
+    }
+  EOF
+}
+
+dependency "vpc" {
+  config_path = "../vpc"
+
+  mock_outputs = {
+    vpc_id = "vpc-00000000000000000"
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+dependency "eks" {
+  config_path = "../eks"
+
+  mock_outputs = {
+    cluster_name                       = "{{ cluster_name }}"
+    cluster_endpoint                   = "https://XXXXXX.gr7.{{ aws_region }}.eks.amazonaws.com"
+    cluster_certificate_authority_data = "dGVzdA=="
+    oidc_provider_arn                  = "arn:aws:iam::{{ account_id }}:oidc-provider/oidc.eks.{{ aws_region }}.amazonaws.com/id/XXXXXX"
+    oidc_provider_url                  = "oidc.eks.{{ aws_region }}.amazonaws.com/id/XXXXXX"
+    node_group_role_arn                = "arn:aws:iam::{{ account_id }}:role/{{ cluster_name }}-node"
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+inputs = {
+  cluster_name                       = dependency.eks.outputs.cluster_name
+  cluster_endpoint                   = dependency.eks.outputs.cluster_endpoint
+  cluster_certificate_authority_data = dependency.eks.outputs.cluster_certificate_authority_data
+  oidc_provider_arn                  = dependency.eks.outputs.oidc_provider_arn
+  oidc_provider_url                  = dependency.eks.outputs.oidc_provider_url
+  vpc_id                             = dependency.vpc.outputs.vpc_id
+  aws_region                         = "{{ aws_region }}"
+
+  # ── Operators ──────────────────────────────────────────────────────────────
+  enable_argocd                       = {{ enable_argocd | lower }}
+  enable_aws_load_balancer_controller = {{ enable_alb_controller | lower }}
+  enable_karpenter                    = {{ enable_karpenter | lower }}
+  enable_external_secrets             = {{ enable_external_secrets | lower }}
+  enable_cert_manager                 = {{ enable_cert_manager | lower }}
+  enable_metrics_server               = true
+  enable_external_dns                 = false
+
+  karpenter_node_role_arn = dependency.eks.outputs.node_group_role_arn
+}

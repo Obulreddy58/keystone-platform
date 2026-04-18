@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ "{{" }} include "chart.fullname" . {{ "}}" }}
+  labels:
+    {{ "{{" }}- include "chart.labels" . | nindent 4 {{ "}}" }}
+spec:
+  {{ "{{" }}- if not .Values.autoscaling.enabled {{ "}}" }}
+  replicas: {{ "{{" }} .Values.replicaCount {{ "}}" }}
+  {{ "{{" }}- end {{ "}}" }}
+  selector:
+    matchLabels:
+      {{ "{{" }}- include "chart.selectorLabels" . | nindent 6 {{ "}}" }}
+  template:
+    metadata:
+      labels:
+        {{ "{{" }}- include "chart.selectorLabels" . | nindent 8 {{ "}}" }}
+    spec:
+      {{ "{{" }}- if .Values.serviceAccount.create {{ "}}" }}
+      serviceAccountName: {{ "{{" }} include "chart.serviceAccountName" . {{ "}}" }}
+      {{ "{{" }}- end {{ "}}" }}
+      containers:
+        - name: {{ "{{" }} .Chart.Name {{ "}}" }}
+          image: "{{ "{{" }} .Values.image.repository {{ "}}" }}:{{ "{{" }} .Values.image.tag {{ "}}" }}"
+          imagePullPolicy: {{ "{{" }} .Values.image.pullPolicy {{ "}}" }}
+          ports:
+            - name: http
+              containerPort: {{ "{{" }} .Values.service.port {{ "}}" }}
+              protocol: TCP
+          {{ "{{" }}- if .Values.probes.liveness {{ "}}" }}
+          livenessProbe:
+            httpGet:
+              path: {{ "{{" }} .Values.probes.liveness.path {{ "}}" }}
+              port: {{ "{{" }} .Values.probes.liveness.port {{ "}}" }}
+            initialDelaySeconds: {{ "{{" }} .Values.probes.liveness.initialDelaySeconds {{ "}}" }}
+            periodSeconds: {{ "{{" }} .Values.probes.liveness.periodSeconds {{ "}}" }}
+          {{ "{{" }}- end {{ "}}" }}
+          {{ "{{" }}- if .Values.probes.readiness {{ "}}" }}
+          readinessProbe:
+            httpGet:
+              path: {{ "{{" }} .Values.probes.readiness.path {{ "}}" }}
+              port: {{ "{{" }} .Values.probes.readiness.port {{ "}}" }}
+            initialDelaySeconds: {{ "{{" }} .Values.probes.readiness.initialDelaySeconds {{ "}}" }}
+            periodSeconds: {{ "{{" }} .Values.probes.readiness.periodSeconds {{ "}}" }}
+          {{ "{{" }}- end {{ "}}" }}
+          resources:
+            {{ "{{" }}- toYaml .Values.resources | nindent 12 {{ "}}" }}
+          {{ "{{" }}- if .Values.env {{ "}}" }}
+          env:
+            {{ "{{" }}- toYaml .Values.env | nindent 12 {{ "}}" }}
+          {{ "{{" }}- end {{ "}}" }}

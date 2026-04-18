@@ -1,0 +1,1812 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keystone IDP</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="/static/service-registry.js"></script>
+<script src="/static/docs-data.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+[x-cloak]{display:none!important}
+.fade-in{animation:fadeIn .2s ease-in}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.toast-enter{animation:slideIn .3s ease-out}
+.toast-leave{animation:slideOut .3s ease-in forwards}
+@keyframes slideIn{from{opacity:0;transform:translateX(100%)}to{opacity:1;transform:translateX(0)}}
+@keyframes slideOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(100%)}}
+@keyframes pulse-live{0%,100%{opacity:1}50%{opacity:.4}}
+.live-dot{animation:pulse-live 2s ease-in-out infinite}
+</style>
+</head>
+<body class="h-full" x-data="app()" x-cloak>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- AUTH SCREEN -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<template x-if="!token">
+<div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900">
+  <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+    <div class="text-center mb-8">
+      <div class="text-4xl mb-2">&#x1F537;</div>
+      <h1 class="text-2xl font-bold text-gray-900">Keystone IDP</h1>
+      <p class="text-gray-500 text-sm mt-1">Internal Developer Platform</p>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <input type="email" x-model="authEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="admin@keystone.io">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+        <input type="password" x-model="authPass" @keyup.enter="login()" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="password">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Full Name <span class="text-gray-400 text-xs">(register only)</span></label>
+        <input type="text" x-model="authName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Jane Smith">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Team <span class="text-gray-400 text-xs">(register only)</span></label>
+        <input type="text" x-model="authTeam" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="platform">
+      </div>
+      <template x-if="authError"><p class="text-red-600 text-sm" x-text="authError"></p></template>
+      <button @click="login()" class="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">Sign In</button>
+      <button @click="register()" class="w-full py-2 text-blue-600 text-sm hover:underline">Create Account</button>
+    </div>
+  </div>
+</div>
+</template>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- MAIN APP SHELL -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<template x-if="token">
+<div class="min-h-screen flex">
+
+  <!-- SIDEBAR -->
+  <nav class="w-64 bg-slate-900 text-white flex flex-col flex-shrink-0">
+    <div class="p-5 border-b border-slate-700">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">&#x1F537;</span>
+        <span class="text-lg font-bold">Keystone</span>
+      </div>
+      <p class="text-slate-400 text-xs mt-1">Internal Developer Platform</p>
+      <div class="flex items-center gap-1.5 mt-2" x-show="wsConnected">
+        <span class="w-2 h-2 rounded-full bg-green-400 live-dot"></span>
+        <span class="text-green-400 text-xs">Live</span>
+      </div>
+      <div class="flex items-center gap-1.5 mt-2" x-show="!wsConnected && token">
+        <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+        <span class="text-gray-500 text-xs">Offline</span>
+      </div>
+    </div>
+    <div class="flex-1 py-4 space-y-1 px-3">
+      <template x-for="item in visibleNav()" :key="item.page">
+        <button @click="navigate(item.page)" :class="page===item.page?'bg-blue-600 text-white':'text-slate-300 hover:bg-slate-800 hover:text-white'" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition">
+          <span x-text="item.icon"></span>
+          <span x-text="item.label"></span>
+        </button>
+      </template>
+    </div>
+    <div class="p-4 border-t border-slate-700">
+      <div class="flex items-center gap-2 text-sm">
+        <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold" x-text="user?.email?.charAt(0).toUpperCase()"></div>
+        <div class="flex-1 min-w-0">
+          <p class="text-white text-sm truncate" x-text="user?.full_name||user?.email"></p>
+          <p class="text-slate-400 text-xs" x-text="user?.role"></p>
+        </div>
+        <button @click="logout()" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition" title="Logout">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h5a2 2 0 012 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="flex-1 overflow-auto">
+    <div class="w-full px-6 py-6">
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: DASHBOARD -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='dashboard'" x-transition class="fade-in">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <p class="text-sm text-gray-500">Total Requests</p>
+            <p class="text-3xl font-bold text-gray-900" x-text="stats.total_requests||0"></p>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <p class="text-sm text-gray-500">Deployed</p>
+            <p class="text-3xl font-bold text-green-600" x-text="stats.deployed||0"></p>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <p class="text-sm text-gray-500">Pending</p>
+            <p class="text-3xl font-bold text-yellow-600" x-text="stats.pending||0"></p>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <p class="text-sm text-gray-500">Failed</p>
+            <p class="text-3xl font-bold text-red-600" x-text="stats.failed||0"></p>
+          </div>
+        </div>
+
+        <!-- By Type / By Team -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-gray-900 mb-3">By Service Type</h3>
+            <div class="space-y-2 max-h-64 overflow-auto">
+              <template x-for="[k,v] in Object.entries(stats.by_type||{})" :key="k">
+                <div class="flex justify-between items-center">
+                  <span class="text-sm text-gray-600" x-text="k"></span>
+                  <span class="text-sm font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full" x-text="v"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+          <div class="bg-white rounded-xl shadow-sm border p-5">
+            <h3 class="font-semibold text-gray-900 mb-3">By Team</h3>
+            <div class="space-y-2">
+              <template x-for="[k,v] in Object.entries(stats.by_team||{})" :key="k">
+                <div class="flex justify-between items-center">
+                  <span class="text-sm text-gray-600" x-text="k"></span>
+                  <span class="text-sm font-medium bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full" x-text="v"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+          <h3 class="font-semibold text-gray-900 mb-3">Recent Activity</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead><tr class="text-left text-gray-500 border-b"><th class="pb-2">Ticket</th><th class="pb-2">Type</th><th class="pb-2">Team</th><th class="pb-2">Status</th><th class="pb-2">Created</th></tr></thead>
+              <tbody>
+                <template x-for="r in (stats.recent_activity||[])" :key="r.jira_ticket_key">
+                  <tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" @click="viewRequest(r.jira_ticket_key)">
+                    <td class="py-2 font-medium text-blue-600" x-text="r.jira_ticket_key"></td>
+                    <td class="py-2" x-text="r.request_type"></td>
+                    <td class="py-2" x-text="r.team_name"></td>
+                    <td class="py-2"><span :class="statusColor(r.status)" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="r.status"></span></td>
+                    <td class="py-2 text-gray-500" x-text="timeAgo(r.created_at)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: SERVICE CATALOG -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='catalog'" x-transition class="fade-in">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Service Catalog</h1>
+          <div class="flex gap-2 flex-wrap">
+            <template x-for="cat in catalogCategories" :key="cat">
+              <button @click="catalogFilter=cat" :class="catalogFilter===cat?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg text-sm font-medium transition" x-text="cat"></button>
+            </template>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <template x-for="s in filteredCatalog()" :key="s.type">
+            <div @click="openRequestForm(s.type)" class="bg-white rounded-xl shadow-sm border p-5 hover:shadow-md hover:border-blue-300 cursor-pointer transition group">
+              <div class="flex items-start gap-3">
+                <span class="text-2xl" x-text="s.icon"></span>
+                <div>
+                  <h3 class="font-semibold text-gray-900 group-hover:text-blue-600 transition" x-text="s.name"></h3>
+                  <p class="text-sm text-gray-500 mt-1" x-text="s.desc"></p>
+                  <span class="inline-block mt-2 px-2 py-0.5 rounded-full text-xs font-medium" :class="catColor(s.category)" x-text="s.category"></span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: NEW REQUEST FORM -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='new-request'" x-transition class="fade-in">
+        <div class="flex items-center gap-3 mb-6">
+          <button @click="navigate('catalog')" class="text-gray-400 hover:text-gray-600">&larr; Back</button>
+          <h1 class="text-2xl font-bold text-gray-900">New Request: <span class="text-blue-600" x-text="selectedServiceName()"></span></h1>
+        </div>
+
+        <div class="max-w-2xl">
+          <div class="bg-white rounded-xl shadow-sm border p-6 space-y-4">
+
+            <!-- Cluster Selection (for SRE and ArgoCD onboarding) -->
+            <template x-if="selectedType==='sre-onboarding' || selectedType==='argocd-onboarding'">
+              <div>
+                <h3 class="font-semibold text-gray-900 mb-2">&#x2638;&#xFE0F; Select Target EKS Cluster</h3>
+                <p class="text-sm text-gray-500 mb-3">Choose a deployed EKS cluster to onboard. Common fields will be auto-filled.</p>
+                <div class="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50" x-show="formClusters.length > 0">
+                  <template x-for="c in formClusters" :key="c.jira_ticket_key">
+                    <div @click="selectFormCluster(c)" class="flex items-center justify-between p-3 rounded-lg border bg-white cursor-pointer hover:border-blue-400 hover:shadow-sm transition" :style="formSelectedCluster?.jira_ticket_key===c.jira_ticket_key ? 'border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.3)' : ''">
+                      <div class="flex items-center gap-3">
+                        <span class="text-lg">&#x2638;&#xFE0F;</span>
+                        <div>
+                          <p class="font-medium text-sm text-gray-900" x-text="c.cluster_name"></p>
+                          <p class="text-xs text-gray-500"><span x-text="c.team_name"></span> &middot; <span x-text="c.environment"></span> &middot; <span x-text="c.account_id"></span></p>
+                        </div>
+                      </div>
+                      <span class="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded" x-text="'v' + c.current_version"></span>
+                    </div>
+                  </template>
+                </div>
+                <div x-show="formClusters.length === 0" class="text-sm text-gray-400 py-4 text-center border rounded-lg bg-gray-50">No deployed EKS clusters found. Provision one first.</div>
+                <template x-if="formSelectedCluster">
+                  <p class="text-xs text-green-600 mt-2">&#x2705; Selected: <span class="font-mono font-bold" x-text="formSelectedCluster.cluster_name"></span> (<span x-text="formSelectedCluster.team_name"></span> / <span x-text="formSelectedCluster.environment"></span>)</p>
+                </template>
+                <hr class="my-4">
+              </div>
+            </template>
+
+            <!-- Team Account Selector -->
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <label class="block text-sm font-semibold text-blue-800 mb-2">Select Team Account</label>
+              <select @change="selectAccount($event.target.value)" class="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                <option value="">-- Choose a registered account (or fill manually below) --</option>
+                <template x-for="a in accounts.filter(a => a.status === 'active' && (!user?.team_name || user.role === 'admin' || a.team_name === user.team_name))" :key="a.team_name">
+                  <option :value="a.team_name" :selected="formSelectedAccount && formSelectedAccount.team_name === a.team_name" x-text="(a.team_display_name || a.team_name) + ' \u2014 ' + (a.account_id || 'no account') + ' (' + a.environment + ')'"></option>
+                </template>
+              </select>
+              <template x-if="formSelectedAccount">
+                <p class="text-xs text-green-700 mt-2 font-medium">&#x2705; Auto-filled from: <span x-text="formSelectedAccount.team_display_name || formSelectedAccount.team_name"></span> &middot; <span class="font-mono" x-text="formSelectedAccount.account_id"></span> &middot; <span x-text="formSelectedAccount.github_group + '/' + formSelectedAccount.github_repo"></span></p>
+              </template>
+            </div>
+
+            <!-- Common Fields -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Team Name *</label>
+                <input type="text" x-model="form.team_name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="data-engineering">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">GitHub Group *</label>
+                <input type="text" x-model="form.github_group" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Obulreddy58">
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">AWS Account ID *</label>
+                <input type="text" x-model="form.account_id" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="123456789012" maxlength="12">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Environment *</label>
+                <select x-model="form.environment" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                  <option value="">Select...</option>
+                  <option value="dev">dev</option>
+                  <option value="staging">staging</option>
+                  <option value="prod">prod</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Cost Center</label>
+                <input type="text" x-model="form.cost_center" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="CC-5100">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">GitHub Repo</label>
+                <input type="text" x-model="form.github_repo" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="infra">
+              </div>
+            </div>
+
+            <hr class="my-4">
+
+            <!-- Dynamic Service-Specific Fields -->
+            <h3 class="font-semibold text-gray-900">Service Configuration</h3>
+            <template x-for="field in serviceFields()" :key="field.name">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  <span x-text="field.label"></span><span x-show="field.required"> *</span>
+                </label>
+                <!-- Text input -->
+                <template x-if="field.type==='text'">
+                  <input type="text" x-model="form[field.name]" :placeholder="field.placeholder||''" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </template>
+                <!-- Number input -->
+                <template x-if="field.type==='number'">
+                  <input type="number" x-model.number="form[field.name]" :min="field.min" :max="field.max" :placeholder="field.placeholder||''" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </template>
+                <!-- Select -->
+                <template x-if="field.type==='select'">
+                  <select x-model="form[field.name]" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <template x-for="opt in field.options" :key="opt"><option :value="opt" x-text="opt"></option></template>
+                  </select>
+                </template>
+                <!-- Checkbox -->
+                <template x-if="field.type==='checkbox'">
+                  <label class="flex items-center gap-2 mt-1">
+                    <input type="checkbox" x-model="form[field.name]" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-sm text-gray-600" x-text="field.desc||''"></span>
+                  </label>
+                </template>
+                <p x-show="field.desc && field.type!=='checkbox'" class="text-xs text-gray-400 mt-0.5" x-text="field.desc"></p>
+              </div>
+            </template>
+
+            <!-- Cost Estimation -->
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-4" x-show="selectedService" x-data="{get estimate() { return getServiceCostEstimate(selectedService, formData); }}">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">💰</span>
+                <h4 class="font-semibold text-amber-900">Estimated Monthly Cost</h4>
+              </div>
+              <div class="text-2xl font-bold text-amber-800">
+                ~$<span x-text="estimate.total.toLocaleString()"></span><span class="text-sm font-normal text-amber-600">/month</span>
+              </div>
+              <div class="mt-2 space-y-1">
+                <template x-for="(item, i) in estimate.breakdown" :key="i">
+                  <div class="flex justify-between text-sm">
+                    <span class="text-amber-700" x-text="item.item"></span>
+                    <span class="text-amber-900 font-medium">$<span x-text="item.cost.toLocaleString()"></span></span>
+                  </div>
+                </template>
+              </div>
+              <p class="text-xs text-amber-500 mt-2">* Estimate based on eu-central-1 on-demand pricing. Actual costs may vary.</p>
+            </div>
+
+            <!-- Submit -->
+            <template x-if="formError"><p class="text-red-600 text-sm" x-text="formError"></p></template>
+            <template x-if="formSuccess">
+              <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                <p class="text-green-800 font-medium">&#x2705; Request Created!</p>
+                <p class="text-green-700 text-sm mt-1">Ticket: <span class="font-mono font-bold" x-text="formSuccess.jira_ticket_key"></span></p>
+                <button @click="viewRequest(formSuccess.jira_ticket_key)" class="mt-2 text-blue-600 text-sm hover:underline">View Request &rarr;</button>
+              </div>
+            </template>
+            <div class="flex gap-3 pt-2" x-show="!formSuccess">
+              <button @click="submitRequest()" :disabled="submitting" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50">
+                <span x-text="submitting?'Submitting...':'Submit Request'"></span>
+              </button>
+              <button @click="navigate('catalog')" class="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: EKS UPGRADE -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='eks-upgrade'" x-transition class="fade-in">
+        <div class="flex items-center gap-3 mb-6">
+          <button @click="navigate('catalog')" class="text-gray-400 hover:text-gray-600">&larr; Back</button>
+          <h1 class="text-2xl font-bold text-gray-900">&#x2B06;&#xFE0F; EKS Cluster Upgrade</h1>
+        </div>
+
+        <!-- Step indicator -->
+        <div class="flex items-center gap-2 mb-6 text-sm">
+          <span :class="upgradeStep>=1?'bg-blue-600 text-white':'bg-gray-200 text-gray-600'" class="w-8 h-8 rounded-full flex items-center justify-center font-bold">1</span>
+          <span class="text-gray-400">Select Cluster</span>
+          <span class="flex-1 border-t border-gray-300"></span>
+          <span :class="upgradeStep>=2?'bg-blue-600 text-white':'bg-gray-200 text-gray-600'" class="w-8 h-8 rounded-full flex items-center justify-center font-bold">2</span>
+          <span class="text-gray-400">Configure Upgrade</span>
+          <span class="flex-1 border-t border-gray-300"></span>
+          <span :class="upgradeStep>=3?'bg-blue-600 text-white':'bg-gray-200 text-gray-600'" class="w-8 h-8 rounded-full flex items-center justify-center font-bold">3</span>
+          <span class="text-gray-400">Review & Initiate</span>
+        </div>
+
+        <!-- STEP 1: Select Cluster -->
+        <div x-show="upgradeStep===1">
+          <div class="bg-white rounded-xl shadow-sm border p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">Select a deployed EKS cluster to upgrade</h2>
+            <p class="text-sm text-gray-500 mb-4">Only clusters on versions below <span class="font-mono font-bold">1.32</span> are eligible. Upgrades follow N&rarr;N+1 rule.</p>
+            <template x-if="upgradeClusters.length===0">
+              <div class="text-center py-8 text-gray-400">
+                <p class="text-lg">No deployed EKS clusters found</p>
+                <p class="text-sm mt-1">Provision an EKS cluster first from the Service Catalog.</p>
+              </div>
+            </template>
+            <div class="space-y-3">
+              <template x-for="c in upgradeClusters" :key="c.jira_ticket_key">
+                <div @click="c.upgrade_available && selectUpgradeCluster(c)" :class="c.upgrade_available ? 'cursor-pointer hover:border-blue-400 hover:shadow-md' : 'opacity-60 cursor-not-allowed'" class="border rounded-lg p-4 transition" :style="selectedUpgradeCluster?.jira_ticket_key===c.jira_ticket_key ? 'border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.3)' : ''">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                      <div class="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-xl">&#x2638;&#xFE0F;</div>
+                      <div>
+                        <p class="font-semibold text-gray-900" x-text="c.cluster_name"></p>
+                        <p class="text-xs text-gray-500"><span x-text="c.team_name"></span> &middot; <span x-text="c.environment"></span> &middot; <span x-text="c.account_id"></span></p>
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded" x-text="'v' + c.current_version"></span>
+                        <template x-if="c.upgrade_available">
+                          <span class="text-green-600">&rarr;</span>
+                        </template>
+                        <template x-if="c.upgrade_available">
+                          <span class="text-sm font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded font-bold" x-text="'v' + c.next_version"></span>
+                        </template>
+                      </div>
+                      <template x-if="c.versions_behind > 0">
+                        <p class="text-xs mt-1" :class="c.versions_behind>=2?'text-red-600':'text-yellow-600'" x-text="c.versions_behind + ' version(s) behind'"></p>
+                      </template>
+                      <template x-if="c.active_upgrade_key">
+                        <p class="text-xs text-blue-600 mt-1">Upgrade in progress: <span x-text="c.active_upgrade_key"></span></p>
+                      </template>
+                      <template x-if="!c.upgrade_available && !c.active_upgrade_key">
+                        <p class="text-xs text-green-600 mt-1">&#x2705; On latest version</p>
+                      </template>
+                    </div>
+                  </div>
+                  <!-- Cluster details row -->
+                  <div class="flex gap-6 mt-3 text-xs text-gray-500">
+                    <span>&#x1F4BB; <span x-text="c.node_instance_type"></span></span>
+                    <span>&#x2699;&#xFE0F; Nodes: <span x-text="c.node_min_size"></span>-<span x-text="c.node_max_size"></span> (desired: <span x-text="c.node_desired_size"></span>)</span>
+                    <span x-show="c.enable_karpenter">&#x1F680; Karpenter</span>
+                    <span>&#x1F4C5; Deployed: <span x-text="c.deployed_at ? new Date(c.deployed_at).toLocaleDateString() : 'N/A'"></span></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div class="mt-6 flex justify-end" x-show="selectedUpgradeCluster">
+              <button @click="upgradeStep=2" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">Next: Configure Upgrade &rarr;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 2: Configure -->
+        <div x-show="upgradeStep===2">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left: Config form -->
+            <div class="lg:col-span-2 space-y-6">
+              <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Upgrade Configuration</h2>
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Upgrade Strategy *</label>
+                    <select x-model="upgradeForm.upgrade_strategy" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                      <option value="rolling">Rolling (in-place, zero-downtime)</option>
+                      <option value="blue-green">Blue-Green (parallel node groups)</option>
+                    </select>
+                    <p class="text-xs text-gray-400 mt-1" x-text="upgradeForm.upgrade_strategy==='rolling'?'Nodes upgraded in batches; workloads stay on existing nodes until drained.':'New node group created alongside old; traffic shifted after validation.'"></p>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Max Unavailable Nodes</label>
+                    <input type="number" x-model.number="upgradeForm.node_max_unavailable" min="1" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-xs text-gray-400 mt-1">Max nodes drained simultaneously (1-10)</p>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Drain Timeout (seconds)</label>
+                    <input type="number" x-model.number="upgradeForm.drain_timeout_seconds" min="60" max="3600" step="60" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-xs text-gray-400 mt-1">Time to wait for pod eviction (60-3600s)</p>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Notification Slack Channel</label>
+                    <input type="text" x-model="upgradeForm.notification_slack_channel" placeholder="#platform-upgrades" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                  </div>
+                </div>
+                <div class="mt-4">
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Notification Email</label>
+                  <input type="email" x-model="upgradeForm.notification_email" :placeholder="user?.email||''" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+              </div>
+
+              <!-- Addon Compatibility Preview -->
+              <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-3">Addon Version Changes</h2>
+                <p class="text-sm text-gray-500 mb-4">These addons will be automatically upgraded as part of the cluster upgrade.</p>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="text-left text-gray-500 border-b">
+                        <th class="pb-2 font-medium">Component</th>
+                        <th class="pb-2 font-medium">Current</th>
+                        <th class="pb-2 font-medium"></th>
+                        <th class="pb-2 font-medium">Target</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="addon in upgradeAddonChanges()" :key="addon.name">
+                        <tr class="border-b border-gray-100">
+                          <td class="py-2 font-medium text-gray-900" x-text="addon.label"></td>
+                          <td class="py-2 font-mono text-gray-600" x-text="addon.from"></td>
+                          <td class="py-2 text-blue-500">&rarr;</td>
+                          <td class="py-2 font-mono font-bold text-green-700" x-text="addon.to"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Cluster summary card -->
+            <div>
+              <div class="bg-white rounded-xl shadow-sm border p-6 sticky top-6">
+                <h3 class="font-semibold text-gray-900 mb-3">Cluster Summary</h3>
+                <div class="space-y-3 text-sm">
+                  <div class="flex justify-between"><span class="text-gray-500">Cluster</span><span class="font-medium" x-text="selectedUpgradeCluster?.cluster_name"></span></div>
+                  <div class="flex justify-between"><span class="text-gray-500">Team</span><span class="font-medium" x-text="selectedUpgradeCluster?.team_name"></span></div>
+                  <div class="flex justify-between"><span class="text-gray-500">Environment</span><span class="font-medium" x-text="selectedUpgradeCluster?.environment"></span></div>
+                  <div class="flex justify-between"><span class="text-gray-500">Account</span><span class="font-mono" x-text="selectedUpgradeCluster?.account_id"></span></div>
+                  <hr>
+                  <div class="flex justify-between"><span class="text-gray-500">Current Version</span><span class="font-mono bg-gray-100 px-2 py-0.5 rounded" x-text="'v' + (selectedUpgradeCluster?.current_version||'')"></span></div>
+                  <div class="flex justify-between"><span class="text-gray-500">Target Version</span><span class="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded font-bold" x-text="'v' + (selectedUpgradeCluster?.next_version||'')"></span></div>
+                  <hr>
+                  <div class="flex justify-between"><span class="text-gray-500">Instance Type</span><span class="font-mono" x-text="selectedUpgradeCluster?.node_instance_type"></span></div>
+                  <div class="flex justify-between"><span class="text-gray-500">Node Range</span><span x-text="(selectedUpgradeCluster?.node_min_size||'?')+' — '+(selectedUpgradeCluster?.node_max_size||'?')"></span></div>
+                  <div class="flex justify-between"><span class="text-gray-500">Desired Nodes</span><span x-text="selectedUpgradeCluster?.node_desired_size"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-6 flex justify-between">
+            <button @click="upgradeStep=1" class="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition">&larr; Back</button>
+            <button @click="upgradeStep=3" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">Next: Review &rarr;</button>
+          </div>
+        </div>
+
+        <!-- STEP 3: Review & Initiate -->
+        <div x-show="upgradeStep===3">
+          <div class="max-w-3xl">
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Review Upgrade Plan</h2>
+
+              <!-- Summary table -->
+              <div class="bg-gray-50 rounded-lg p-4 space-y-2 text-sm mb-6">
+                <div class="grid grid-cols-2 gap-2">
+                  <span class="text-gray-500">Cluster:</span><span class="font-medium" x-text="selectedUpgradeCluster?.cluster_name"></span>
+                  <span class="text-gray-500">Team / Env:</span><span class="font-medium" x-text="(selectedUpgradeCluster?.team_name||'')+' / '+(selectedUpgradeCluster?.environment||'')"></span>
+                  <span class="text-gray-500">Version Change:</span><span class="font-mono font-bold" x-text="(selectedUpgradeCluster?.current_version||'')+' → '+(selectedUpgradeCluster?.next_version||'')"></span>
+                  <span class="text-gray-500">Strategy:</span><span class="font-medium" x-text="upgradeForm.upgrade_strategy"></span>
+                  <span class="text-gray-500">Max Unavailable:</span><span x-text="upgradeForm.node_max_unavailable + ' node(s)'"></span>
+                  <span class="text-gray-500">Drain Timeout:</span><span x-text="upgradeForm.drain_timeout_seconds + 's'"></span>
+                  <span class="text-gray-500">Slack:</span><span x-text="upgradeForm.notification_slack_channel || '(none)'"></span>
+                  <span class="text-gray-500">Email:</span><span x-text="upgradeForm.notification_email || '(none)'"></span>
+                </div>
+              </div>
+
+              <!-- Upgrade stages overview -->
+              <h3 class="font-semibold text-gray-900 mb-3">Upgrade Stages</h3>
+              <div class="space-y-2 mb-6">
+                <div class="flex items-center gap-3 text-sm bg-blue-50 rounded-lg p-3">
+                  <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                  <span class="font-medium">Pre-Checks</span>
+                  <span class="text-gray-500 ml-auto">Cluster health, version skew, PDBs, subnet IPs, API deprecations</span>
+                </div>
+                <div class="flex items-center gap-3 text-sm bg-blue-50 rounded-lg p-3">
+                  <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                  <span class="font-medium">Control Plane</span>
+                  <span class="text-gray-500 ml-auto">EKS managed control plane version bump via Terraform</span>
+                </div>
+                <div class="flex items-center gap-3 text-sm bg-blue-50 rounded-lg p-3">
+                  <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                  <span class="font-medium">Addons</span>
+                  <span class="text-gray-500 ml-auto">VPC CNI, CoreDNS, kube-proxy, Karpenter</span>
+                </div>
+                <div class="flex items-center gap-3 text-sm bg-blue-50 rounded-lg p-3">
+                  <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
+                  <span class="font-medium">Node Groups</span>
+                  <span class="text-gray-500 ml-auto" x-text="upgradeForm.upgrade_strategy + ' update with max ' + upgradeForm.node_max_unavailable + ' unavailable'"></span>
+                </div>
+                <div class="flex items-center gap-3 text-sm bg-blue-50 rounded-lg p-3">
+                  <span class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-bold">5</span>
+                  <span class="font-medium">Post-Checks</span>
+                  <span class="text-gray-500 ml-auto">Node validation, GitOps reconciliation, load test</span>
+                </div>
+              </div>
+
+              <!-- Warning -->
+              <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <p class="text-yellow-800 text-sm font-medium">&#x26A0;&#xFE0F; This will initiate an upgrade on a live cluster. Auto-rollback is enabled if any stage fails.</p>
+              </div>
+
+              <template x-if="upgradeError"><p class="text-red-600 text-sm mb-4" x-text="upgradeError"></p></template>
+              <template x-if="upgradeSuccess">
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                  <p class="text-green-800 font-medium">&#x2705; Upgrade Initiated!</p>
+                  <p class="text-green-700 text-sm mt-1">Ticket: <span class="font-mono font-bold" x-text="upgradeSuccess.jira_ticket_key"></span></p>
+                  <p class="text-green-700 text-sm"><span x-text="upgradeSuccess.cluster_name"></span>: <span x-text="upgradeSuccess.current_version"></span> &rarr; <span x-text="upgradeSuccess.target_version"></span></p>
+                  <button @click="viewRequest(upgradeSuccess.jira_ticket_key)" class="mt-2 text-blue-600 text-sm hover:underline">View Upgrade &rarr;</button>
+                </div>
+              </template>
+
+              <div class="flex justify-between" x-show="!upgradeSuccess">
+                <button @click="upgradeStep=2" class="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition">&larr; Back</button>
+                <button @click="submitUpgrade()" :disabled="submitting" class="px-6 py-2.5 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 transition disabled:opacity-50">
+                  <span x-text="submitting?'Initiating...':'&#x1F680; Initiate Upgrade'"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: REQUESTS LIST -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='requests'" x-transition class="fade-in">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Requests</h1>
+          <button @click="navigate('catalog')" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Request</button>
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex flex-wrap gap-3">
+          <input type="text" x-model="reqSearch" @input.debounce.300ms="loadRequests()" placeholder="Search tickets, resources..." class="px-3 py-2 border border-gray-300 rounded-lg text-sm flex-1 min-w-[12rem] focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <select x-model="reqStatusFilter" @change="loadRequests()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All Statuses</option>
+            <option value="pending">Pending</option><option value="provisioning">Provisioning</option><option value="deployed">Deployed</option><option value="failed">Failed</option>
+          </select>
+          <select x-model="reqTypeFilter" @change="loadRequests()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All Types</option>
+            <template x-for="s in catalog" :key="s.type"><option :value="s.type" x-text="s.name"></option></template>
+          </select>
+          <select x-model="reqTeamFilter" @change="loadRequests()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All Teams</option>
+            <template x-for="t in Object.keys(stats.by_team||{})" :key="t"><option :value="t" x-text="t"></option></template>
+          </select>
+        </div>
+
+        <!-- Table -->
+        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <table class="w-full text-sm">
+            <thead><tr class="text-left text-gray-500 bg-gray-50 border-b">
+              <th class="px-4 py-3">Ticket</th><th class="py-3">Type</th><th class="py-3">Resource</th><th class="py-3">Team</th><th class="py-3">Env</th><th class="py-3">Status</th><th class="py-3">Created</th>
+            </tr></thead>
+            <tbody>
+              <template x-for="r in requests" :key="r.jira_ticket_key">
+                <tr class="border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition" @click="viewRequest(r.jira_ticket_key)">
+                  <td class="px-4 py-3 font-medium text-blue-600" x-text="r.jira_ticket_key"></td>
+                  <td class="py-3" x-text="r.request_type"></td>
+                  <td class="py-3 font-medium" x-text="r.resource_name"></td>
+                  <td class="py-3" x-text="r.team_name"></td>
+                  <td class="py-3"><span class="px-2 py-0.5 rounded text-xs font-medium" :class="envColor(r.environment)" x-text="r.environment"></span></td>
+                  <td class="py-3"><span :class="statusColor(r.status)" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="r.status"></span></td>
+                  <td class="py-3 text-gray-500" x-text="timeAgo(r.created_at)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="requests.length===0" class="text-center py-12 text-gray-400">No requests found</div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: REQUEST DETAIL -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='detail'" x-transition class="fade-in">
+        <div class="flex items-center gap-3 mb-6">
+          <button @click="navigate('requests')" class="text-gray-400 hover:text-gray-600">&larr; Back</button>
+          <h1 class="text-2xl font-bold text-gray-900" x-text="detail?.jira_ticket_key||''"></h1>
+          <span :class="statusColor(detail?.status)" class="px-3 py-1 rounded-full text-sm font-medium" x-text="detail?.status"></span>
+        </div>
+
+        <template x-if="detail">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <!-- Left: Info -->
+          <div class="lg:col-span-2 space-y-6">
+            <!-- Overview Card -->
+            <div class="bg-white rounded-xl shadow-sm border p-5">
+              <h3 class="font-semibold text-gray-900 mb-4">Request Overview</h3>
+              <div class="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
+                <div><span class="text-gray-500">Type:</span> <span class="ml-1 font-medium" x-text="detail.request_type"></span></div>
+                <div><span class="text-gray-500">Resource:</span> <span class="ml-1 font-medium" x-text="detail.resource_name"></span></div>
+                <div><span class="text-gray-500">Team:</span> <span class="ml-1 font-medium" x-text="detail.team_name"></span></div>
+                <div><span class="text-gray-500">Environment:</span> <span class="ml-1 px-2 py-0.5 rounded text-xs font-medium" :class="envColor(detail.environment)" x-text="detail.environment"></span></div>
+                <div><span class="text-gray-500">Account:</span> <span class="ml-1 font-mono text-xs" x-text="detail.account_id"></span></div>
+                <div><span class="text-gray-500">Requester:</span> <span class="ml-1" x-text="detail.requester_email"></span></div>
+                <div><span class="text-gray-500">Branch:</span> <span class="ml-1 font-mono text-xs" x-text="detail.branch_name"></span></div>
+                <div><span class="text-gray-500">Files:</span> <span class="ml-1" x-text="detail.files_created"></span></div>
+              </div>
+              <template x-if="detail.pr_url">
+                <a :href="detail.pr_url" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 mt-3 text-sm text-blue-600 hover:underline">&#x1F4CE; View Pull Request &rarr;</a>
+              </template>
+            </div>
+
+            <!-- Request Config -->
+            <div class="bg-white rounded-xl shadow-sm border p-5" x-show="detail.request_data">
+              <h3 class="font-semibold text-gray-900 mb-3">Configuration</h3>
+              <div class="bg-gray-50 rounded-lg p-4 font-mono text-xs overflow-auto max-h-64">
+                <pre x-text="JSON.stringify(detail.request_data,null,2)"></pre>
+              </div>
+            </div>
+
+            <!-- Deployment Outputs -->
+            <div class="bg-white rounded-xl shadow-sm border p-5" x-show="detail.deployment_outputs && Object.keys(detail.deployment_outputs).length">
+              <h3 class="font-semibold text-gray-900 mb-3">Deployment Outputs</h3>
+              <div class="space-y-2">
+                <template x-for="[k,v] in Object.entries(detail.deployment_outputs||{})" :key="k">
+                  <div class="flex items-start gap-2 text-sm">
+                    <span class="text-gray-500 min-w-[8rem]" x-text="k+':'"></span>
+                    <span class="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded break-all" x-text="v"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- Access Guide (shown when deployed) -->
+            <div class="bg-white rounded-xl shadow-sm border p-5" x-show="detail.status==='deployed' && getAccessGuide(detail).length > 0">
+              <div class="flex items-center gap-2 mb-4">
+                <span class="text-lg">&#x1F4D6;</span>
+                <h3 class="font-semibold text-gray-900">Access Guide</h3>
+                <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Ready to use</span>
+              </div>
+              <p class="text-sm text-gray-500 mb-4">Follow these steps to connect to your provisioned resource from your local environment.</p>
+              <div class="space-y-4">
+                <template x-for="(section, si) in getAccessGuide(detail)" :key="si">
+                  <div>
+                    <h4 class="text-sm font-semibold text-gray-800 flex items-center gap-2 mb-2">
+                      <span class="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold" x-text="si+1"></span>
+                      <span x-text="section.title"></span>
+                    </h4>
+                    <template x-if="section.desc">
+                      <p class="text-sm text-gray-600 mb-2 ml-8" x-text="section.desc"></p>
+                    </template>
+                    <template x-for="(cmd, ci) in (section.commands||[])" :key="ci">
+                      <div class="ml-8 mb-1.5">
+                        <template x-if="cmd.label">
+                          <p class="text-xs text-gray-500 mb-0.5" x-text="cmd.label"></p>
+                        </template>
+                        <div class="bg-gray-900 text-green-400 rounded-lg px-4 py-2 font-mono text-xs overflow-x-auto whitespace-pre" x-text="cmd.code"></div>
+                      </div>
+                    </template>
+                    <template x-for="(note, ni) in (section.notes||[])" :key="ni">
+                      <p class="text-xs text-gray-500 ml-8 mt-1" x-text="'\u2139\uFE0F ' + note"></p>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- File Paths -->
+            <div class="bg-white rounded-xl shadow-sm border p-5" x-show="detail.file_paths?.length">
+              <h3 class="font-semibold text-gray-900 mb-3">Generated Files</h3>
+              <template x-for="fp in detail.file_paths||[]" :key="fp">
+                <p class="font-mono text-xs text-gray-600 py-1" x-text="fp"></p>
+              </template>
+            </div>
+          </div>
+
+          <!-- Right: Timeline -->
+          <div>
+            <div class="bg-white rounded-xl shadow-sm border p-5">
+              <h3 class="font-semibold text-gray-900 mb-4">Timeline</h3>
+              <div class="space-y-4">
+                <template x-for="evt in (detail.events||[])" :key="evt.id">
+                  <div class="relative pl-6 border-l-2 border-gray-200 pb-4">
+                    <div class="absolute -left-1.5 top-1 w-3 h-3 rounded-full" :class="eventDotColor(evt.event_type)"></div>
+                    <p class="text-sm font-medium text-gray-900" x-text="evt.event_type.replace(/_/g,' ')"></p>
+                    <p class="text-sm text-gray-600 mt-0.5" x-text="evt.description"></p>
+                    <p class="text-xs text-gray-400 mt-1" x-text="timeAgo(evt.created_at)"></p>
+                  </div>
+                </template>
+                <div x-show="(detail.events||[]).length===0" class="text-gray-400 text-sm">No events yet</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </template>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: TEAM ACCOUNTS -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='teams'" x-transition class="fade-in">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Team Accounts</h1>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <template x-for="a in accounts" :key="a.team_name">
+            <div class="bg-white rounded-xl shadow-sm border p-5">
+              <div class="flex items-center justify-between mb-3">
+                <h3 class="font-semibold text-gray-900" x-text="a.team_display_name||a.team_name"></h3>
+                <span :class="accountStatusColor(a.status)" class="px-2 py-0.5 rounded-full text-xs font-medium" x-text="a.status"></span>
+              </div>
+              <div class="space-y-1 text-sm text-gray-600">
+                <p>Account: <span class="font-mono" x-text="a.account_id||'--'"></span></p>
+                <p>GitHub: <span class="font-mono" x-text="a.github_group+'/'+a.github_repo"></span></p>
+                <p>Owner: <span x-text="a.product_owner_email"></span></p>
+                <p>BU: <span x-text="a.business_unit||'--'"></span></p>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div x-show="accounts.length===0" class="text-center py-12 text-gray-400">No team accounts found</div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: DOCUMENTATION -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='docs'" x-transition class="fade-in">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Documentation</h1>
+
+        <!-- Top Filter Bar -->
+        <div class="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap gap-3 items-center">
+          <input type="text" x-model="docSearch" placeholder="Search documentation..." class="px-3 py-2 border border-gray-300 rounded-lg text-sm flex-1 min-w-[14rem] focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <div class="flex gap-2">
+            <button @click="docTab='services'" :class="docTab==='services'?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg text-sm font-medium transition">Service Guides</button>
+            <button @click="docTab='admin'" :class="docTab==='admin'?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg text-sm font-medium transition">Platform Admin</button>
+            <button @click="docTab='teams'" :class="docTab==='teams'?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg text-sm font-medium transition">Team Guides</button>
+          </div>
+        </div>
+
+        <!-- SERVICE GUIDES TAB -->
+        <div x-show="docTab==='services'" class="space-y-3">
+          <template x-for="svc in filteredServiceDocs()" :key="svc.type">
+            <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <button @click="toggleDocSection(svc.type)" class="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition">
+                <div class="flex items-center gap-3">
+                  <span class="text-xl" x-text="svc.icon"></span>
+                  <div class="text-left">
+                    <h3 class="font-semibold text-gray-900" x-text="svc.name"></h3>
+                    <p class="text-sm text-gray-500" x-text="svc.desc"></p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-400" x-text="'Updated: '+(getServiceDoc(svc.type).updated||'—')"></span>
+                  <svg :class="docOpen[svc.type]?'rotate-180':''" class="w-5 h-5 text-gray-400 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                </div>
+              </button>
+              <div x-show="docOpen[svc.type]" x-transition class="border-t px-5 pb-5">
+                <template x-if="getServiceDoc(svc.type).comingSoon">
+                  <div class="py-8 text-center">
+                    <p class="text-lg font-medium text-gray-400">Documentation Coming Soon</p>
+                    <p class="text-sm text-gray-400 mt-1" x-text="'Documentation for '+svc.name+' is being written. Check back soon.'"></p>
+                    <div class="mt-4 text-left max-w-md mx-auto text-sm text-gray-400">
+                      <p>Planned sections:</p>
+                      <ul class="list-disc ml-5 mt-1"><li>Overview</li><li>Use Cases</li><li>Pre-requisites</li><li>How to Provision</li><li>Configuration Options</li><li>FAQs / Troubleshooting</li></ul>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="!getServiceDoc(svc.type).comingSoon">
+                  <div class="space-y-6 pt-4">
+                    <div>
+                      <h4 class="text-sm font-bold text-blue-700 uppercase tracking-wide mb-2">Overview</h4>
+                      <p class="text-sm text-gray-700 leading-relaxed" x-text="getServiceDoc(svc.type).overview"></p>
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-bold text-blue-700 uppercase tracking-wide mb-2">Use Cases</h4>
+                      <ul class="list-disc ml-5 space-y-1">
+                        <template x-for="uc in getServiceDoc(svc.type).useCases||[]" :key="uc"><li class="text-sm text-gray-700" x-text="uc"></li></template>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-bold text-blue-700 uppercase tracking-wide mb-2">Pre-requisites</h4>
+                      <ul class="list-disc ml-5 space-y-1">
+                        <template x-for="pr in getServiceDoc(svc.type).prerequisites||[]" :key="pr"><li class="text-sm text-gray-700" x-text="pr"></li></template>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-bold text-blue-700 uppercase tracking-wide mb-2">How to Provision</h4>
+                      <ol class="list-decimal ml-5 space-y-1">
+                        <template x-for="(step,i) in getServiceDoc(svc.type).howToProvision||[]" :key="i"><li class="text-sm text-gray-700" x-text="step"></li></template>
+                      </ol>
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-bold text-blue-700 uppercase tracking-wide mb-2">Configuration Options</h4>
+                      <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                          <thead><tr class="text-left text-gray-500 border-b"><th class="pb-2 pr-4">Parameter</th><th class="pb-2">Description</th></tr></thead>
+                          <tbody>
+                            <template x-for="opt in getServiceDoc(svc.type).configOptions||[]" :key="opt.param">
+                              <tr class="border-b border-gray-50"><td class="py-2 pr-4 font-mono text-xs text-blue-600" x-text="opt.param"></td><td class="py-2 text-gray-700" x-text="opt.desc"></td></tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-bold text-blue-700 uppercase tracking-wide mb-2">FAQs / Troubleshooting</h4>
+                      <div class="space-y-3">
+                        <template x-for="faq in getServiceDoc(svc.type).faqs||[]" :key="faq.q">
+                          <div>
+                            <p class="text-sm font-medium text-gray-900" x-text="'Q: '+faq.q"></p>
+                            <p class="text-sm text-gray-600 mt-0.5" x-text="'A: '+faq.a"></p>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                    <div class="pt-2">
+                      <button @click="openRequestForm(svc.type)" class="text-sm text-blue-600 hover:underline">&rarr; Provision this service now</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- PLATFORM ADMIN TAB -->
+        <div x-show="docTab==='admin'" class="space-y-3">
+          <template x-for="(sec,idx) in adminDocSections()" :key="idx">
+            <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <button @click="toggleDocSection('admin-'+idx)" class="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition">
+                <h3 class="font-semibold text-gray-900" x-text="sec.title"></h3>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-400" x-text="'Updated: '+(KEYSTONE_DOCS.admin.updated||'—')"></span>
+                  <svg :class="docOpen['admin-'+idx]?'rotate-180':''" class="w-5 h-5 text-gray-400 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                </div>
+              </button>
+              <div x-show="docOpen['admin-'+idx]" x-transition class="border-t px-5 py-4">
+                <div class="space-y-2">
+                  <template x-for="(line,li) in sec.content" :key="li">
+                    <p class="text-sm leading-relaxed" :class="line.startsWith('**') ? 'font-semibold text-gray-900 mt-3' : (line.startsWith('•')||line.startsWith('`')) ? 'text-gray-700 ml-2 font-mono text-xs' : line==='' ? 'h-2' : 'text-gray-700'" x-text="line.replace(/\*\*/g,'')"></p>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- TEAM GUIDES TAB -->
+        <div x-show="docTab==='teams'" class="space-y-3">
+          <template x-for="team in filteredTeamDocs()" :key="team.id">
+            <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <button @click="toggleDocSection('team-'+team.id)" class="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition">
+                <div class="flex items-center gap-3">
+                  <span class="text-xl" x-text="team.icon"></span>
+                  <h3 class="font-semibold text-gray-900" x-text="team.name"></h3>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-400" x-text="'Updated: '+team.updated"></span>
+                  <svg :class="docOpen['team-'+team.id]?'rotate-180':''" class="w-5 h-5 text-gray-400 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                </div>
+              </button>
+              <div x-show="docOpen['team-'+team.id]" x-transition class="border-t px-5 pb-5">
+                <template x-for="(sec,si) in team.sections" :key="si">
+                  <div class="pt-4">
+                    <h4 class="text-sm font-bold text-purple-700 uppercase tracking-wide mb-2" x-text="sec.title"></h4>
+                    <div class="space-y-2">
+                      <template x-for="(line,li) in sec.content" :key="li">
+                        <p class="text-sm leading-relaxed" :class="line.startsWith('**') ? 'font-semibold text-gray-900 mt-2' : (line.startsWith('•')||line.startsWith('   ')) ? 'text-gray-700 ml-2' : line==='' ? 'h-2' : 'text-gray-700'" x-text="line.replace(/\*\*/g,'')"></p>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: ADMIN PANEL -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='admin'" x-transition class="fade-in">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">&#x1F6E1;&#xFE0F; Admin Panel</h1>
+        </div>
+
+        <!-- Admin Tabs -->
+        <div class="flex gap-2 mb-6">
+          <button @click="adminTab='overview'" :class="adminTab==='overview'?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-4 py-2 rounded-lg text-sm font-medium transition">Overview</button>
+          <button @click="adminTab='users'" :class="adminTab==='users'?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-4 py-2 rounded-lg text-sm font-medium transition">User Management</button>
+          <button @click="adminTab='activity'" :class="adminTab==='activity'?'bg-blue-600 text-white':'bg-white text-gray-600 border hover:bg-gray-50'" class="px-4 py-2 rounded-lg text-sm font-medium transition">Activity Log</button>
+        </div>
+
+        <!-- OVERVIEW TAB -->
+        <div x-show="adminTab==='overview'" class="space-y-6">
+          <template x-if="adminSystem">
+            <div>
+              <!-- Stat Cards -->
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white rounded-xl shadow-sm border p-5">
+                  <p class="text-sm text-gray-500">Total Users</p>
+                  <p class="text-3xl font-bold text-gray-900" x-text="adminSystem.users.total"></p>
+                  <p class="text-xs text-gray-400 mt-1"><span x-text="adminSystem.users.admins"></span> admins &middot; <span x-text="adminSystem.users.active"></span> active</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border p-5">
+                  <p class="text-sm text-gray-500">Total Requests</p>
+                  <p class="text-3xl font-bold text-blue-600" x-text="adminSystem.requests.total"></p>
+                  <p class="text-xs text-gray-400 mt-1"><span x-text="adminSystem.requests.this_week"></span> this week</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border p-5">
+                  <p class="text-sm text-gray-500">Team Accounts</p>
+                  <p class="text-3xl font-bold text-green-600" x-text="adminSystem.teams.total"></p>
+                  <p class="text-xs text-gray-400 mt-1"><span x-text="adminSystem.teams.active"></span> active</p>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border p-5">
+                  <p class="text-sm text-gray-500">Timeline Events</p>
+                  <p class="text-3xl font-bold text-purple-600" x-text="adminSystem.events_total"></p>
+                  <p class="text-xs text-gray-400 mt-1">Total audit entries</p>
+                </div>
+              </div>
+
+              <!-- Request Status Breakdown -->
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-xl shadow-sm border p-6">
+                  <h3 class="font-semibold text-gray-900 mb-4">Requests by Status</h3>
+                  <div class="space-y-3">
+                    <template x-for="(count, status) in adminSystem.requests.by_status" :key="status">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span class="w-3 h-3 rounded-full" :class="{'bg-yellow-400':status==='pending','bg-blue-400':status==='provisioning','bg-green-500':status==='deployed','bg-red-500':status==='failed','bg-gray-400':true}[status]||'bg-gray-400'"></span>
+                          <span class="text-sm text-gray-700 capitalize" x-text="status"></span>
+                        </div>
+                        <span class="text-sm font-bold" x-text="count"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border p-6">
+                  <h3 class="font-semibold text-gray-900 mb-4">Requests by Type</h3>
+                  <div class="space-y-2 max-h-64 overflow-y-auto">
+                    <template x-for="(count, type) in adminSystem.by_type" :key="type">
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm text-gray-700" x-text="type"></span>
+                        <div class="flex items-center gap-2">
+                          <div class="w-32 bg-gray-100 rounded-full h-2"><div class="bg-blue-500 h-2 rounded-full" :style="'width:'+Math.min(100, count/adminSystem.requests.total*100)+'%'"></div></div>
+                          <span class="text-sm font-bold w-8 text-right" x-text="count"></span>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Platform Permissions Legend -->
+              <div class="bg-white rounded-xl shadow-sm border p-6 mt-6">
+                <h3 class="font-semibold text-gray-900 mb-4">Role Permissions</h3>
+                <div class="overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead><tr class="text-left text-gray-500 border-b"><th class="pb-2 font-medium">Permission</th><th class="pb-2 font-medium text-center">Admin</th><th class="pb-2 font-medium text-center">Viewer</th></tr></thead>
+                    <tbody>
+                      <tr class="border-b border-gray-100"><td class="py-2">View Dashboard &amp; Requests</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-green-600">&#x2705;</td></tr>
+                      <tr class="border-b border-gray-100"><td class="py-2">Create Infrastructure Requests</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-green-600">&#x2705;</td></tr>
+                      <tr class="border-b border-gray-100"><td class="py-2">View Service Catalog &amp; Docs</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-green-600">&#x2705;</td></tr>
+                      <tr class="border-b border-gray-100"><td class="py-2">Initiate EKS Upgrades</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-red-400">&#x274C;</td></tr>
+                      <tr class="border-b border-gray-100"><td class="py-2">Manage Users &amp; Roles</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-red-400">&#x274C;</td></tr>
+                      <tr class="border-b border-gray-100"><td class="py-2">Approve Team Accounts</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-red-400">&#x274C;</td></tr>
+                      <tr class="border-b border-gray-100"><td class="py-2">View Audit / Activity Log</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-red-400">&#x274C;</td></tr>
+                      <tr><td class="py-2">System Health &amp; Metrics</td><td class="py-2 text-center text-green-600">&#x2705;</td><td class="py-2 text-center text-red-400">&#x274C;</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- USERS TAB -->
+        <div x-show="adminTab==='users'">
+          <div class="bg-white rounded-xl shadow-sm border">
+            <div class="p-4 border-b flex items-center gap-3">
+              <input type="text" x-model="adminUserSearch" placeholder="Search users..." class="px-3 py-2 border border-gray-300 rounded-lg text-sm flex-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <span class="text-sm text-gray-500" x-text="adminUsers.length+' user(s)'"></span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead><tr class="text-left text-gray-500 border-b bg-gray-50"><th class="px-4 py-3 font-medium">User</th><th class="px-4 py-3 font-medium">Role</th><th class="px-4 py-3 font-medium">Status</th><th class="px-4 py-3 font-medium">Requests</th><th class="px-4 py-3 font-medium">Joined</th><th class="px-4 py-3 font-medium">Actions</th></tr></thead>
+                <tbody>
+                  <template x-for="u in filteredAdminUsers()" :key="u.id">
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                      <td class="px-4 py-3">
+                        <div class="flex items-center gap-3">
+                          <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" :class="u.role==='admin'?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'" x-text="u.email.charAt(0).toUpperCase()"></div>
+                          <div>
+                            <p class="font-medium text-gray-900" x-text="u.full_name"></p>
+                            <p class="text-xs text-gray-500" x-text="u.email"></p>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="u.role==='admin'?'bg-purple-100 text-purple-700':'bg-gray-100 text-gray-700'" x-text="u.role"></span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="u.is_active?'bg-green-100 text-green-700':'bg-red-100 text-red-700'" x-text="u.is_active?'Active':'Disabled'"></span>
+                      </td>
+                      <td class="px-4 py-3 font-mono" x-text="u.request_count"></td>
+                      <td class="px-4 py-3 text-gray-500" x-text="u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'"></td>
+                      <td class="px-4 py-3">
+                        <div class="flex gap-2" x-show="u.email !== user?.email">
+                          <button @click="toggleUserRole(u)" class="text-xs px-2 py-1 rounded border hover:bg-gray-50 transition" x-text="u.role==='admin'?'Make Viewer':'Make Admin'"></button>
+                          <button @click="toggleUserStatus(u)" class="text-xs px-2 py-1 rounded border transition" :class="u.is_active?'text-red-600 hover:bg-red-50':'text-green-600 hover:bg-green-50'" x-text="u.is_active?'Disable':'Enable'"></button>
+                        </div>
+                        <span x-show="u.email === user?.email" class="text-xs text-gray-400">You</span>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ACTIVITY TAB -->
+        <div x-show="adminTab==='activity'">
+          <div class="bg-white rounded-xl shadow-sm border">
+            <div class="p-4 border-b">
+              <h3 class="font-semibold text-gray-900">Platform Activity Log</h3>
+              <p class="text-sm text-gray-500">Recent events across all requests and users</p>
+            </div>
+            <div class="divide-y max-h-[600px] overflow-y-auto">
+              <template x-for="ev in adminActivity" :key="ev.id">
+                <div class="px-4 py-3 hover:bg-gray-50 flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs mt-0.5" :class="{'bg-green-100 text-green-700':ev.event_type==='status_changed'||ev.event_type==='deployed','bg-blue-100 text-blue-700':ev.event_type==='created','bg-yellow-100 text-yellow-700':ev.event_type==='upgrade_initiated','bg-red-100 text-red-700':ev.event_type==='failed','bg-gray-100 text-gray-700':true}[ev.event_type]||'bg-gray-100 text-gray-700'">
+                    <span x-text="{'created':'\u{1F4DD}','status_changed':'\u{1F504}','upgrade_initiated':'\u2B06\uFE0F','deployed':'\u2705','failed':'\u274C'}[ev.event_type]||'\u{1F4CC}'"></span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-gray-900" x-text="ev.description"></p>
+                    <div class="flex gap-3 mt-1 text-xs text-gray-500">
+                      <span x-text="ev.ticket_key" class="font-mono"></span>
+                      <span x-text="ev.request_type"></span>
+                      <span x-text="ev.requester_email"></span>
+                    </div>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap" x-text="ev.created_at ? new Date(ev.created_at).toLocaleString() : ''"></span>
+                </div>
+              </template>
+              <div x-show="adminActivity.length===0" class="p-8 text-center text-gray-400">No activity recorded yet</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <!-- PAGE: USER PROFILE -->
+      <!-- ════════════════════════════════════════════════════════════════ -->
+      <div x-show="page==='profile'" x-transition class="fade-in">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">&#x1F464; My Profile</h1>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <!-- Profile Card -->
+          <div class="bg-white rounded-xl shadow-sm border p-6">
+            <div class="text-center">
+              <div class="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center text-2xl font-bold text-white mx-auto" x-text="user?.email?.charAt(0).toUpperCase()"></div>
+              <h2 class="text-xl font-bold text-gray-900 mt-4" x-text="user?.full_name || user?.email"></h2>
+              <p class="text-sm text-gray-500" x-text="user?.email"></p>
+              <span class="inline-block mt-2 px-3 py-1 rounded-full text-xs font-medium" :class="user?.role==='admin'?'bg-purple-100 text-purple-700':'bg-blue-100 text-blue-700'" x-text="user?.role"></span>
+            </div>
+            <hr class="my-4">
+            <div class="space-y-3 text-sm">
+              <div class="flex justify-between"><span class="text-gray-500">Status</span><span class="text-green-600 font-medium">Active</span></div>
+              <div class="flex justify-between"><span class="text-gray-500">Member since</span><span class="text-gray-700" x-text="user?.created_at ? new Date(user.created_at).toLocaleDateString() : '—'"></span></div>
+              <div class="flex justify-between"><span class="text-gray-500">User ID</span><span class="text-gray-700 font-mono" x-text="user?.id"></span></div>
+            </div>
+          </div>
+
+          <!-- My Stats -->
+          <div class="lg:col-span-2 space-y-6">
+            <!-- Quick Stats -->
+            <div class="grid grid-cols-3 gap-4">
+              <div class="bg-white rounded-xl shadow-sm border p-5 text-center">
+                <p class="text-3xl font-bold text-blue-600" x-text="profileRequests.length"></p>
+                <p class="text-sm text-gray-500 mt-1">My Requests</p>
+              </div>
+              <div class="bg-white rounded-xl shadow-sm border p-5 text-center">
+                <p class="text-3xl font-bold text-green-600" x-text="profileRequests.filter(r=>(r.status||'').toLowerCase()==='deployed').length"></p>
+                <p class="text-sm text-gray-500 mt-1">Deployed</p>
+              </div>
+              <div class="bg-white rounded-xl shadow-sm border p-5 text-center">
+                <p class="text-3xl font-bold text-yellow-600" x-text="profileRequests.filter(r=>['pending','provisioning','plan_running','awaiting_approval'].includes((r.status||'').toLowerCase())).length"></p>
+                <p class="text-sm text-gray-500 mt-1">In Progress</p>
+              </div>
+            </div>
+
+            <!-- My Permissions -->
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+              <h3 class="font-semibold text-gray-900 mb-3">My Permissions</h3>
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <div class="flex items-center gap-2"><span class="text-green-600">&#x2705;</span> View Dashboard &amp; Stats</div>
+                <div class="flex items-center gap-2"><span class="text-green-600">&#x2705;</span> Service Catalog &amp; Docs</div>
+                <div class="flex items-center gap-2"><span class="text-green-600">&#x2705;</span> Create Requests</div>
+                <div class="flex items-center gap-2"><span class="text-green-600">&#x2705;</span> View My Requests</div>
+                <div class="flex items-center gap-2"><span x-text="user?.role==='admin'?'\u2705':'\u274C'" :class="user?.role==='admin'?'text-green-600':'text-red-400'"></span> Manage Users &amp; Roles</div>
+                <div class="flex items-center gap-2"><span x-text="user?.role==='admin'?'\u2705':'\u274C'" :class="user?.role==='admin'?'text-green-600':'text-red-400'"></span> Approve Team Accounts</div>
+                <div class="flex items-center gap-2"><span x-text="user?.role==='admin'?'\u2705':'\u274C'" :class="user?.role==='admin'?'text-green-600':'text-red-400'"></span> Initiate EKS Upgrades</div>
+                <div class="flex items-center gap-2"><span x-text="user?.role==='admin'?'\u2705':'\u274C'" :class="user?.role==='admin'?'text-green-600':'text-red-400'"></span> View Audit Log</div>
+              </div>
+            </div>
+
+            <!-- My Recent Requests -->
+            <div class="bg-white rounded-xl shadow-sm border">
+              <div class="p-4 border-b flex items-center justify-between">
+                <h3 class="font-semibold text-gray-900">My Recent Requests</h3>
+                <button @click="navigate('requests')" class="text-sm text-blue-600 hover:underline">View all &rarr;</button>
+              </div>
+              <div class="divide-y">
+                <template x-for="r in profileRequests.slice(0,10)" :key="r.jira_ticket_key">
+                  <div class="px-4 py-3 hover:bg-gray-50 flex items-center justify-between cursor-pointer" @click="viewRequest(r.jira_ticket_key)">
+                    <div class="flex items-center gap-3">
+                      <span class="font-mono text-sm text-blue-600" x-text="r.jira_ticket_key"></span>
+                      <span class="text-sm text-gray-700" x-text="r.resource_name || r.request_type"></span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="{'bg-green-100 text-green-700':r.status==='deployed','bg-yellow-100 text-yellow-700':r.status==='pending','bg-blue-100 text-blue-700':r.status==='provisioning','bg-red-100 text-red-700':r.status==='failed'}[r.status]||'bg-gray-100 text-gray-700'" x-text="r.status"></span>
+                      <span class="text-xs text-gray-400" x-text="r.created_at ? new Date(r.created_at).toLocaleDateString() : ''"></span>
+                    </div>
+                  </div>
+                </template>
+                <div x-show="profileRequests.length===0" class="p-8 text-center text-gray-400">No requests yet. Head to the Service Catalog to get started!</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- TOAST NOTIFICATIONS -->
+  <div class="fixed top-4 right-4 z-50 space-y-2 w-96">
+    <template x-for="toast in toasts" :key="toast.id">
+      <div :class="toast.removing ? 'toast-leave' : 'toast-enter'" class="rounded-lg shadow-lg border p-4 flex items-start gap-3 cursor-pointer" :class="toastStyle(toast.severity)" @click="removeToast(toast.id)">
+        <span class="text-lg" x-text="toastIcon(toast.severity)"></span>
+        <div class="flex-1 min-w-0">
+          <p class="font-medium text-sm" x-text="toast.title"></p>
+          <p class="text-sm opacity-80 mt-0.5" x-text="toast.message"></p>
+          <button x-show="toast.ticket_key" @click.stop="viewRequest(toast.ticket_key); removeToast(toast.id)" class="text-xs mt-1 underline opacity-70 hover:opacity-100">View request</button>
+        </div>
+        <button @click.stop="removeToast(toast.id)" class="text-lg opacity-50 hover:opacity-100">&times;</button>
+      </div>
+    </template>
+  </div>
+
+</div>
+</template>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- ALPINE.JS APPLICATION -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<script>
+function app() {
+  return {
+    // -- Auth --
+    token: localStorage.getItem('ks_token')||'',
+    user: JSON.parse(localStorage.getItem('ks_user')||'null'),
+    authEmail: '', authPass: '', authName: '', authTeam: '', authError: '',
+
+    // -- Navigation --
+    page: 'dashboard',
+    navItems: [
+      {page:'dashboard', icon:'\u{1F4CA}', label:'Dashboard'},
+      {page:'catalog',   icon:'\u{1F4E6}', label:'Service Catalog'},
+      {page:'requests',  icon:'\u{1F4CB}', label:'Requests'},
+      {page:'teams',     icon:'\u{1F465}', label:'Team Accounts'},
+      {page:'docs',      icon:'\u{1F4D6}', label:'Documentation'},
+      {page:'admin',     icon:'\u{1F6E1}\uFE0F', label:'Admin Panel', adminOnly:true},
+      {page:'profile',   icon:'\u{1F464}', label:'My Profile'},
+    ],
+    visibleNav() {
+      return this.navItems.filter(function(item) {
+        if (item.adminOnly && (!this.user || this.user.role !== 'admin')) return false;
+        return true;
+      }.bind(this));
+    },
+
+    // -- Data --
+    stats: {},
+    requests: [],
+    accounts: [],
+    formSelectedAccount: null,
+    detail: null,
+
+    // -- WebSocket / Live --
+    ws: null,
+    wsConnected: false,
+    toasts: [],
+    toastCounter: 0,
+
+    // -- Request Filters --
+    reqSearch: '', reqStatusFilter: '', reqTypeFilter: '', reqTeamFilter: '',
+
+    // -- Catalog --
+    catalogFilter: 'All',
+    catalogCategories: ['All','Compute','Data','Networking','Onboarding','Operations'],
+
+    // -- Documentation --
+    docTab: 'services',
+    docSearch: '',
+    docOpen: {},
+
+    // -- EKS Upgrade --
+    upgradeClusters: [],
+    selectedUpgradeCluster: null,
+    upgradeStep: 1,
+    upgradeForm: { upgrade_strategy: 'rolling', node_max_unavailable: 1, drain_timeout_seconds: 300, notification_slack_channel: '', notification_email: '' },
+    upgradeError: '',
+    upgradeSuccess: null,
+
+    // -- Admin Panel --
+    adminTab: 'overview',
+    adminUsers: [],
+    adminActivity: [],
+    adminSystem: null,
+    adminUserSearch: '',
+
+    // -- User Profile --
+    profileRequests: [],
+    profileStats: null,
+
+    // -- Form --
+    selectedType: '',
+    form: {},
+    formError: '', formSuccess: null, submitting: false,
+    formClusters: [],
+    formSelectedCluster: null,
+
+    // -- Service Catalog & Fields (auto-generated from SERVICE_REGISTRY) --
+    catalog: Object.keys(SERVICE_REGISTRY).map(function(t) { var s = SERVICE_REGISTRY[t]; return {type:t, name:s.name, icon:s.icon, category:s.category, desc:s.description}; }),
+    serviceFieldDefs: Object.fromEntries(Object.keys(SERVICE_REGISTRY).map(function(t) { return [t, SERVICE_REGISTRY[t].fields]; })),
+    // -- Init --
+    async init() {
+      if (this.token) {
+        await this.loadDashboard();
+        this.connectWebSocket();
+      }
+    },
+
+    // -- WebSocket --
+    connectWebSocket() {
+      if (this.ws) { try { this.ws.close(); } catch(e) {} }
+      var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      var email = this.user?.email || '';
+      var url = proto + '//' + location.host + '/ws?email=' + encodeURIComponent(email);
+      this.ws = new WebSocket(url);
+      var self = this;
+      this.ws.onopen = function() { self.wsConnected = true; };
+      this.ws.onclose = function() {
+        self.wsConnected = false;
+        // Auto-reconnect after 3s
+        setTimeout(function() { if (self.token) self.connectWebSocket(); }, 3000);
+      };
+      this.ws.onerror = function() { self.wsConnected = false; };
+      this.ws.onmessage = function(evt) { self.handleWsMessage(evt); };
+    },
+    handleWsMessage(evt) {
+      try {
+        var data = JSON.parse(evt.data);
+      } catch(e) { return; }
+
+      if (data.type === 'request_created') {
+        this.addToast('New Request', data.message, 'info', data.ticket_key);
+        // Live-update dashboard if viewing it
+        if (this.page === 'dashboard') this.loadDashboard();
+        if (this.page === 'requests') this.loadRequests();
+      }
+      else if (data.type === 'status_changed') {
+        var severity = data.new_status === 'deployed' ? 'success'
+                     : data.new_status === 'failed' ? 'error' : 'info';
+        this.addToast('Status Update', data.message, severity, data.ticket_key);
+        // Live-update current views
+        if (this.page === 'dashboard') this.loadDashboard();
+        if (this.page === 'requests') this.loadRequests();
+        // If viewing this specific request, refresh it
+        if (this.page === 'detail' && this.detail && this.detail.jira_ticket_key === data.ticket_key) {
+          this.viewRequest(data.ticket_key);
+        }
+      }
+      else if (data.type === 'notification') {
+        this.addToast(data.title, data.message, data.severity || 'info', data.ticket_key);
+      }
+    },
+
+    // -- Toast Notifications --
+    addToast(title, message, severity, ticket_key) {
+      var id = ++this.toastCounter;
+      this.toasts.push({ id: id, title: title, message: message, severity: severity || 'info', ticket_key: ticket_key || '', removing: false });
+      var self = this;
+      // Auto-dismiss after 6 seconds
+      setTimeout(function() { self.removeToast(id); }, 6000);
+    },
+    removeToast(id) {
+      var t = this.toasts.find(function(x) { return x.id === id; });
+      if (t && !t.removing) {
+        t.removing = true;
+        var self = this;
+        setTimeout(function() { self.toasts = self.toasts.filter(function(x) { return x.id !== id; }); }, 300);
+      }
+    },
+    toastStyle(severity) {
+      var m = {
+        success: 'bg-green-50 border-green-200 text-green-800',
+        error: 'bg-red-50 border-red-200 text-red-800',
+        warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+        info: 'bg-blue-50 border-blue-200 text-blue-800'
+      };
+      return m[severity] || m.info;
+    },
+    toastIcon(severity) {
+      return {success:'\u2705', error:'\u274C', warning:'\u26A0\uFE0F', info:'\u{1F514}'}[severity] || '\u{1F514}';
+    },
+
+    // -- Authenticated Fetch Helper --
+    async authFetch(url, options) {
+      options = options || {};
+      if (!options.headers) options.headers = {};
+      if (this.token) options.headers['Authorization'] = 'Bearer ' + this.token;
+      return fetch(url, options);
+    },
+
+    // -- Auth Methods --
+    async login() {
+      this.authError = '';
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email: this.authEmail, password: this.authPass})
+        });
+        if (!r.ok) { const e = await r.json(); this.authError = e.detail || 'Login failed'; return; }
+        const d = await r.json();
+        this.token = d.access_token; this.user = d.user;
+        localStorage.setItem('ks_token', d.access_token);
+        localStorage.setItem('ks_user', JSON.stringify(d.user));
+        await this.loadDashboard();
+        this.connectWebSocket();
+      } catch(e) { this.authError = 'Connection error'; }
+    },
+    async register() {
+      this.authError = '';
+      try {
+        const r = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email: this.authEmail, password: this.authPass, full_name: this.authName || this.authEmail.split('@')[0], team_name: this.authTeam || ''})
+        });
+        if (!r.ok) { const e = await r.json(); this.authError = e.detail || 'Registration failed'; return; }
+        const d = await r.json();
+        this.token = d.access_token; this.user = d.user;
+        localStorage.setItem('ks_token', d.access_token);
+        localStorage.setItem('ks_user', JSON.stringify(d.user));
+        await this.loadDashboard();
+        this.connectWebSocket();
+      } catch(e) { this.authError = 'Connection error'; }
+    },
+    logout() {
+      this.token = ''; this.user = null;
+      localStorage.removeItem('ks_token');
+      localStorage.removeItem('ks_user');
+      if (this.ws) { try { this.ws.close(); } catch(e) {} this.ws = null; }
+      this.wsConnected = false;
+    },
+
+    // -- Navigation --
+    navigate(p) {
+      this.page = p;
+      if (p === 'dashboard') this.loadDashboard();
+      if (p === 'requests') this.loadRequests();
+      if (p === 'teams') this.loadAccounts();
+      if (p === 'eks-upgrade') this.loadUpgradeClusters();
+      if (p === 'admin') this.loadAdmin();
+      if (p === 'profile') this.loadProfile();
+    },
+
+    // -- Admin Panel Methods --
+    async loadAdmin() {
+      this.adminTab = 'overview';
+      try {
+        var [sys, users, activity] = await Promise.all([
+          this.authFetch('/api/admin/system').then(r => r.ok ? r.json() : null),
+          this.authFetch('/api/admin/users').then(r => r.ok ? r.json() : []),
+          this.authFetch('/api/admin/activity').then(r => r.ok ? r.json() : []),
+        ]);
+        this.adminSystem = sys;
+        this.adminUsers = users;
+        this.adminActivity = activity;
+      } catch(e) { console.error('Failed to load admin data', e); }
+    },
+    filteredAdminUsers() {
+      if (!this.adminUserSearch) return this.adminUsers;
+      var q = this.adminUserSearch.toLowerCase();
+      return this.adminUsers.filter(function(u) { return u.email.toLowerCase().includes(q) || (u.full_name||'').toLowerCase().includes(q); });
+    },
+    async toggleUserRole(u) {
+      var newRole = u.role === 'admin' ? 'viewer' : 'admin';
+      try {
+        var r = await this.authFetch('/api/admin/users/'+u.id+'/role', {
+          method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({role: newRole})
+        });
+        if (r.ok) { u.role = newRole; this.addToast('User Updated', u.email+' is now '+newRole, 'success'); }
+        else { var e = await r.json(); this.addToast('Error', e.detail || 'Failed to update role', 'error'); }
+      } catch(e) { this.addToast('Error', 'Connection error', 'error'); }
+    },
+    async toggleUserStatus(u) {
+      var newStatus = !u.is_active;
+      try {
+        var r = await this.authFetch('/api/admin/users/'+u.id+'/status', {
+          method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({is_active: newStatus})
+        });
+        if (r.ok) { u.is_active = newStatus; this.addToast('User Updated', u.email+' '+(newStatus?'enabled':'disabled'), 'success'); }
+        else { var e = await r.json(); this.addToast('Error', e.detail || 'Failed to update status', 'error'); }
+      } catch(e) { this.addToast('Error', 'Connection error', 'error'); }
+    },
+
+    // -- User Profile Methods --
+    async loadProfile() {
+      try {
+        var email = this.user?.email || '';
+        var r = await this.authFetch('/api/requests?search='+encodeURIComponent(email)+'&limit=50');
+        this.profileRequests = r.ok ? await r.json() : [];
+      } catch(e) { console.error('Failed to load profile', e); this.profileRequests = []; }
+    },
+
+    // -- EKS Upgrade Methods --
+    async loadUpgradeClusters() {
+      this.selectedUpgradeCluster = null;
+      this.upgradeStep = 1;
+      this.upgradeError = '';
+      this.upgradeSuccess = null;
+      this.upgradeForm = { upgrade_strategy: 'rolling', node_max_unavailable: 1, drain_timeout_seconds: 300, notification_slack_channel: '', notification_email: this.user?.email || '' };
+      try {
+        var r = await this.authFetch('/api/upgrades/clusters');
+        this.upgradeClusters = await r.json();
+      } catch(e) { console.error('Failed to load clusters', e); this.upgradeClusters = []; }
+    },
+    selectUpgradeCluster(c) {
+      this.selectedUpgradeCluster = c;
+    },
+    upgradeAddonChanges() {
+      var c = this.selectedUpgradeCluster;
+      if (!c) return [];
+      var curr = c.current_addons || {};
+      var next = c.next_addons || {};
+      var labels = {'vpc-cni':'VPC CNI','coredns':'CoreDNS','kube-proxy':'kube-proxy','karpenter':'Karpenter','cluster-autoscaler':'Cluster Autoscaler'};
+      var result = [];
+      for (var k in next) {
+        result.push({ name: k, label: labels[k]||k, from: curr[k]||'—', to: next[k] });
+      }
+      return result;
+    },
+    async submitUpgrade() {
+      this.upgradeError = ''; this.submitting = true;
+      try {
+        var body = {
+          source_cluster_key: this.selectedUpgradeCluster.jira_ticket_key,
+          target_version: this.selectedUpgradeCluster.next_version,
+          upgrade_strategy: this.upgradeForm.upgrade_strategy,
+          node_max_unavailable: this.upgradeForm.node_max_unavailable,
+          drain_timeout_seconds: this.upgradeForm.drain_timeout_seconds,
+          notification_slack_channel: this.upgradeForm.notification_slack_channel,
+          notification_email: this.upgradeForm.notification_email
+        };
+        var r = await this.authFetch('/api/upgrades/initiate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        if (!r.ok) {
+          var e = await r.json();
+          this.upgradeError = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail);
+          return;
+        }
+        this.upgradeSuccess = await r.json();
+      } catch(e) { this.upgradeError = 'Connection error'; }
+      finally { this.submitting = false; }
+    },
+
+    // -- Data Loading --
+    async loadDashboard() {
+      try {
+        const [s, a] = await Promise.all([
+          this.authFetch('/api/stats').then(r => r.json()),
+          this.authFetch('/api/accounts').then(r => r.json())
+        ]);
+        this.stats = s; this.accounts = a;
+      } catch(e) { console.error('Failed to load dashboard', e); }
+    },
+    async loadRequests() {
+      let url = '/api/requests?limit=100';
+      if (this.reqStatusFilter) url += '&status=' + encodeURIComponent(this.reqStatusFilter);
+      if (this.reqTypeFilter) url += '&request_type=' + encodeURIComponent(this.reqTypeFilter);
+      if (this.reqTeamFilter) url += '&team=' + encodeURIComponent(this.reqTeamFilter);
+      if (this.reqSearch) url += '&search=' + encodeURIComponent(this.reqSearch);
+      try { this.requests = await this.authFetch(url).then(r => r.json()); } catch(e) { console.error(e); }
+    },
+    async loadAccounts() {
+      try { this.accounts = await this.authFetch('/api/accounts').then(r => r.json()); } catch(e) { console.error(e); }
+    },
+    async viewRequest(key) {
+      try {
+        this.detail = await this.authFetch('/api/requests/' + encodeURIComponent(key)).then(r => r.json());
+        this.page = 'detail';
+      } catch(e) { console.error(e); }
+    },
+
+    // -- Catalog --
+    filteredCatalog() {
+      if (this.catalogFilter === 'All') return this.catalog;
+      return this.catalog.filter(s => s.category === this.catalogFilter);
+    },
+
+    // -- Request Form --
+    openRequestForm(type) {
+      if (type === 'eks-upgrade') { this.navigate('eks-upgrade'); return; }
+      this.selectedType = type;
+      this.formError = ''; this.formSuccess = null;
+      this.formClusters = []; this.formSelectedCluster = null; this.formSelectedAccount = null;
+      // Load accounts for the selector
+      if (!this.accounts.length) await this.loadAccounts();
+      this.form = {
+        request_type: type,
+        team_name: this.user?.team_name || '',
+        github_group: '',
+        github_repo: 'infra',
+        account_id: '',
+        environment: '',
+        cost_center: '',
+        requester_email: this.user?.email || ''
+      };
+      // Smart auto-fill: if user's team has exactly one active account, auto-select it
+      var teamAccounts = this.accounts.filter(a => a.status === 'active' && (!this.user?.team_name || a.team_name === this.user.team_name));
+      if (teamAccounts.length === 1) {
+        this.selectAccount(teamAccounts[0].team_name);
+      }
+      var fields = this.serviceFieldDefs[type] || [];
+      for (var i = 0; i < fields.length; i++) {
+        var f = fields[i];
+        if (f.type === 'checkbox') this.form[f.name] = true;
+        else if (f.type === 'select' && f.options && f.options.length) this.form[f.name] = f.options[0];
+        else if (f.type === 'number') this.form[f.name] = f.min || 1;
+        else this.form[f.name] = '';
+      }
+      // Load deployed clusters for dependent services
+      if (SERVICE_REGISTRY[type] && SERVICE_REGISTRY[type].clusterDependent) {
+        this.loadFormClusters();
+      }
+      this.page = 'new-request';
+    },
+    async loadFormClusters() {
+      try {
+        var r = await this.authFetch('/api/upgrades/clusters');
+        this.formClusters = r.ok ? await r.json() : [];
+      } catch(e) { this.formClusters = []; }
+    },
+    selectAccount(teamName) {
+      if (!teamName) { this.formSelectedAccount = null; return; }
+      var a = this.accounts.find(function(x) { return x.team_name === teamName; });
+      if (!a) return;
+      this.formSelectedAccount = a;
+      this.form.team_name = a.team_name || '';
+      this.form.account_id = a.account_id || '';
+      this.form.github_group = a.github_group || '';
+      this.form.github_repo = a.github_repo || 'infra';
+      this.form.environment = a.environment || '';
+      this.form.cost_center = a.cost_center || '';
+    },
+    selectFormCluster(c) {
+      this.formSelectedCluster = c;
+      // Auto-fill common fields from the cluster
+      this.form.team_name = c.team_name || '';
+      this.form.github_group = c.github_group || '';
+      this.form.github_repo = c.github_repo || 'infra';
+      this.form.account_id = c.account_id || '';
+      this.form.environment = c.environment || '';
+      // Auto-fill service-specific fields
+      if (this.selectedType === 'sre-onboarding') {
+        this.form.cluster_name = c.cluster_name || '';
+        this.form.cluster_endpoint = (c.deployment_outputs && c.deployment_outputs.cluster_endpoint) || '';
+      }
+      if (this.selectedType === 'argocd-onboarding') {
+        this.form.source_cluster_key = c.jira_ticket_key || '';
+        this.form.cluster_name = c.cluster_name || '';
+      }
+    },
+    serviceFields() { return this.serviceFieldDefs[this.selectedType] || []; },
+    selectedServiceName() {
+      var s = this.catalog.find(function(s) { return s.type === this.selectedType; }.bind(this));
+      return s ? s.name : this.selectedType;
+    },
+    async submitRequest() {
+      this.formError = ''; this.submitting = true;
+      try {
+        var r = await this.authFetch('/api/requests', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(this.form)
+        });
+        if (!r.ok) {
+          var e = await r.json();
+          if (Array.isArray(e.detail)) {
+            this.formError = e.detail.map(function(d) { return (d.loc ? d.loc.slice(-1)[0] : '') + ': ' + d.msg; }).join(', ');
+          } else {
+            this.formError = typeof e.detail === 'string' ? e.detail : JSON.stringify(e.detail);
+          }
+          return;
+        }
+        this.formSuccess = await r.json();
+      } catch(e) { this.formError = 'Connection error'; }
+      finally { this.submitting = false; }
+    },
+
+    // -- Helpers --
+
+    // -- Documentation Methods --
+    getServiceDoc(type) {
+      if (typeof KEYSTONE_DOCS !== 'undefined' && KEYSTONE_DOCS.services[type]) {
+        return KEYSTONE_DOCS.services[type];
+      }
+      return { comingSoon: true, updated: null };
+    },
+    filteredServiceDocs() {
+      var q = this.docSearch.toLowerCase();
+      return this.catalog.filter(function(s) {
+        if (!q) return true;
+        return s.name.toLowerCase().indexOf(q) >= 0 ||
+               s.type.toLowerCase().indexOf(q) >= 0 ||
+               s.desc.toLowerCase().indexOf(q) >= 0 ||
+               s.category.toLowerCase().indexOf(q) >= 0;
+      });
+    },
+    adminDocSections() {
+      if (typeof KEYSTONE_DOCS !== 'undefined' && KEYSTONE_DOCS.admin) {
+        var q = this.docSearch.toLowerCase();
+        if (!q) return KEYSTONE_DOCS.admin.sections;
+        return KEYSTONE_DOCS.admin.sections.filter(function(s) {
+          return s.title.toLowerCase().indexOf(q) >= 0 ||
+                 s.content.join(' ').toLowerCase().indexOf(q) >= 0;
+        });
+      }
+      return [];
+    },
+    filteredTeamDocs() {
+      if (typeof KEYSTONE_DOCS !== 'undefined' && KEYSTONE_DOCS.teams) {
+        var q = this.docSearch.toLowerCase();
+        if (!q) return KEYSTONE_DOCS.teams;
+        return KEYSTONE_DOCS.teams.filter(function(t) {
+          if (t.name.toLowerCase().indexOf(q) >= 0) return true;
+          for (var i = 0; i < t.sections.length; i++) {
+            if (t.sections[i].title.toLowerCase().indexOf(q) >= 0) return true;
+            if (t.sections[i].content.join(' ').toLowerCase().indexOf(q) >= 0) return true;
+          }
+          return false;
+        });
+      }
+      return [];
+    },
+    toggleDocSection(key) {
+      this.docOpen[key] = !this.docOpen[key];
+    },
+
+    statusColor(s) {
+      var m = {
+        deployed:'bg-green-100 text-green-700',
+        pending:'bg-yellow-100 text-yellow-700',
+        provisioning:'bg-blue-100 text-blue-700',
+        failed:'bg-red-100 text-red-700',
+        plan_running:'bg-indigo-100 text-indigo-700',
+        awaiting_approval:'bg-orange-100 text-orange-700',
+        cancelled:'bg-gray-100 text-gray-500',
+        destroyed:'bg-gray-100 text-gray-500'
+      };
+      return m[s] || 'bg-gray-100 text-gray-600';
+    },
+    envColor(e) {
+      var m = {prod:'bg-red-100 text-red-700 font-medium',staging:'bg-yellow-100 text-yellow-700',dev:'bg-green-100 text-green-700'};
+      return m[e] || 'bg-gray-100 text-gray-600';
+    },
+    catColor(c) {
+      var m = {Compute:'bg-blue-100 text-blue-700',Data:'bg-cyan-100 text-cyan-700',Networking:'bg-emerald-100 text-emerald-700',Onboarding:'bg-purple-100 text-purple-700',Operations:'bg-amber-100 text-amber-700'};
+      return m[c] || 'bg-gray-100 text-gray-600';
+    },
+    accountStatusColor(s) {
+      var m = {active:'bg-green-100 text-green-700',pending_approval:'bg-yellow-100 text-yellow-700',provisioning:'bg-blue-100 text-blue-700',suspended:'bg-red-100 text-red-700'};
+      return m[s] || 'bg-gray-100 text-gray-600';
+    },
+    getAccessGuide(d) {
+      if (!d || d.status !== 'deployed') return [];
+      var t = d.request_type, o = d.deployment_outputs || {}, r = d.request_data || {};
+      var name = r.name || r.cluster_name || r.table_name || r.function_name || r.bucket_name || r.zone_name || 'my-resource';
+      var region = r.aws_region || r.region || 'eu-central-1';
+      var env = r.environment || 'dev';
+      var acct = d.aws_account_id || r.aws_account_id || '123456789012';
+      var endpoint = o.endpoint || o.cluster_endpoint || '';
+      var entry = SERVICE_REGISTRY[t];
+      if (entry && entry.accessGuide) {
+        return entry.accessGuide(r, o, env, region, name, acct, endpoint);
+      }
+      return [{title:'Access Information', desc:'Refer to the deployment outputs above for endpoints and connection details. Use the AWS CLI or SDK with your team credentials to connect.', commands:[{label:'Verify AWS access', code:'aws sts get-caller-identity --profile keystone-'+env}]}];
+    },
+    eventDotColor(t) {
+      var m = {created:'bg-blue-500',pr_created:'bg-purple-500',status_change:'bg-green-500',security_scan_passed:'bg-emerald-500',plan_complete:'bg-indigo-500',error:'bg-red-500'};
+      return m[t] || 'bg-gray-400';
+    },
+    timeAgo(d) {
+      if (!d) return '';
+      var s = Math.floor((Date.now() - new Date(d)) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    },
+  };
+}
+</script>
+</body>
+</html>

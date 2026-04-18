@@ -1,0 +1,152 @@
+# -----------------------------------------------------------------------------
+# Observability Stack for {{ cluster_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Team: {{ team_name }}
+#
+# Deploys the full observability agent stack onto the team's EKS cluster:
+#   - Prometheus Agent (remote-write mode → central AMP/Mimir)
+#   - kube-state-metrics
+#   - node-exporter
+#   - OpenTelemetry Collector (optional, for traces)
+#   - Grafana datasource + folder registration
+#   - SLO/SLI recording rules + burn-rate alerts
+#   - Incident management integration (PagerDuty / OpsGenie)
+#   - On-call rotation + escalation policies
+#   - Runbook automation
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//observability-stack?ref={{ iac_template_ref }}"
+}
+
+dependency "vpc_peering" {
+  config_path = "../vpc-peering"
+
+  mock_outputs = {
+    peering_connection_id = "pcx-00000000000000000"
+    peering_status        = "active"
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+inputs = {
+  # ── Cluster ────────────────────────────────────────────────────────────────
+  cluster_name = "{{ cluster_name }}"
+  {% if cluster_endpoint %}
+  cluster_endpoint = "{{ cluster_endpoint }}"
+  {% endif %}
+  aws_region   = "{{ aws_region }}"
+  account_id   = "{{ account_id }}"
+  environment  = "{{ environment }}"
+  team_name    = "{{ team_name }}"
+
+  # ── VPC Peering (must be active before collectors can reach central stack) ─
+  vpc_peering_connection_id = dependency.vpc_peering.outputs.peering_connection_id
+
+  # ── Prometheus Agent ───────────────────────────────────────────────────────
+  # Runs in agent mode (no local TSDB) — scrapes locally, remote-writes to central
+  prometheus_remote_write_url = "{{ prometheus_remote_write_url }}"
+  scrape_interval             = "{{ scrape_interval }}"
+  wal_retention_hours         = {{ metrics_retention_hours }}
+
+  # External labels added to all metrics for multi-tenant querying
+  prometheus_external_labels = {
+    cluster     = "{{ cluster_name }}"
+    account_id  = "{{ account_id }}"
+    environment = "{{ environment }}"
+    team        = "{{ team_name }}"
+  }
+
+  # ── kube-state-metrics ─────────────────────────────────────────────────────
+  enable_kube_state_metrics = true
+
+  # ── node-exporter ──────────────────────────────────────────────────────────
+  enable_node_exporter = true
+
+  # ── OpenTelemetry Collector ────────────────────────────────────────────────
+  enable_otel_collector = {{ enable_otel_collector | lower }}
+  {% if enable_tracing %}
+  enable_tracing        = true
+  tracing_endpoint      = "{{ tracing_endpoint }}"
+  {% else %}
+  enable_tracing        = false
+  {% endif %}
+
+  {% if enable_logging %}
+  # ── Log shipping ──────────────────────────────────────────────────────────
+  enable_logging   = true
+  logging_endpoint = "{{ logging_endpoint }}"
+  {% else %}
+  enable_logging   = false
+  {% endif %}
+
+  # ── SLO / SLI Configuration ───────────────────────────────────────────────
+  # Deploys Prometheus recording rules for availability, latency, and error SLIs
+  # plus multi-window multi-burn-rate alerting rules
+  {% if slo_availability_target is defined %}
+  slo_availability_target   = {{ slo_availability_target }}
+  slo_latency_p99_ms        = {{ slo_latency_p99_ms }}
+  slo_error_rate_threshold  = {{ slo_error_rate_threshold }}
+  enable_error_budget_alert = {{ error_budget_burn_alert | lower }}
+  {% endif %}
+
+  # ── Incident Management ────────────────────────────────────────────────────
+  {% if incident_tool is defined and incident_tool != 'none' %}
+  incident_tool      = "{{ incident_tool }}"
+  escalation_policy  = "{{ escalation_policy }}"
+  {% if incident_tool == 'pagerduty' %}
+  pagerduty_service_id = "{{ pagerduty_service_id }}"
+  {% elif incident_tool == 'opsgenie' %}
+  opsgenie_team_id     = "{{ opsgenie_team_id }}"
+  {% endif %}
+  {% endif %}
+
+  # ── On-Call Rotation ───────────────────────────────────────────────────────
+  {% if oncall_rotation_name is defined %}
+  oncall_rotation_name    = "{{ oncall_rotation_name }}"
+  oncall_primary_email    = "{{ oncall_primary_email }}"
+  oncall_secondary_email  = "{{ oncall_secondary_email }}"
+  {% endif %}
+
+  # ── Runbooks ───────────────────────────────────────────────────────────────
+  {% if enable_runbooks is defined and enable_runbooks %}
+  enable_runbooks    = true
+  runbook_wiki_space = "{{ runbook_wiki_space }}"
+  {% else %}
+  enable_runbooks    = false
+  {% endif %}
+
+  # ── Notifications ──────────────────────────────────────────────────────────
+  {% if notification_slack_channel is defined %}
+  notification_slack_channel = "{{ notification_slack_channel }}"
+  {% endif %}
+  {% if notification_email is defined %}
+  notification_email = "{{ notification_email }}"
+  {% endif %}
+
+  # ── Grafana Registration ───────────────────────────────────────────────────
+  # Creates a Grafana folder for the team + AMP datasource scoped to this cluster
+  grafana_org_name = "{{ grafana_org_name or team_name }}"
+
+  grafana_dashboard_labels = {
+    cluster     = "{{ cluster_name }}"
+    environment = "{{ environment }}"
+    team        = "{{ team_name }}"
+  }
+
+  # ── Helm Values ────────────────────────────────────────────────────────────
+  helm_namespace         = "observability"
+  helm_create_namespace  = true
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    CostCenter  = "{{ cost_center }}"
+    JiraTicket  = "{{ jira_ticket_key }}"
+    ManagedBy   = "terragrunt"
+  }
+}

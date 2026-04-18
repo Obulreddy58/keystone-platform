@@ -1,0 +1,69 @@
+# -----------------------------------------------------------------------------
+# Stage 2: EKS Addon Upgrades
+# Target K8s version: {{ target_version }}
+# Cluster: {{ cluster_name }}
+#
+# Upgrades all EKS-managed addons to versions compatible with the new
+# control plane version. Each addon is updated independently.
+#
+# Components:
+#   - vpc-cni          → Network plugin (pod networking)
+#   - coredns          → Cluster DNS resolution
+#   - kube-proxy       → Service networking / iptables rules
+#   - karpenter        → Node autoscaling (if enabled)
+#   - cluster-autoscaler → Legacy autoscaler (if enabled)
+#
+# ⚠️  Addon versions must match the control plane version.
+#     Run this AFTER control-plane stage completes.
+#
+# Estimated time: 5-10 minutes
+# Rollback: terraform apply with previous addon versions
+# -----------------------------------------------------------------------------
+
+terraform {
+  source = "git::https://github.com/{{ github_group }}/terraform-aws-eks-addons.git//modules/addons?ref=main"
+}
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+dependency "eks" {
+  config_path = "../control-plane"
+}
+
+inputs = {
+  cluster_name    = dependency.eks.outputs.cluster_name
+  cluster_version = "{{ target_version }}"
+
+  # ─── Core Addons ─────────────────────────────────────────────────────
+  vpc_cni_version    = "{{ addon_vpc_cni_version | default('v1.19.2') }}"
+  coredns_version    = "{{ addon_coredns_version | default('v1.11.4') }}"
+  kube_proxy_version = "{{ addon_kube_proxy_version | default('v1.32.0') }}"
+
+  # ─── Autoscaling ────────────────────────────────────────────────────
+{% if enable_karpenter | default(true) %}
+  enable_karpenter  = true
+  karpenter_version = "{{ addon_karpenter_version | default('1.2.0') }}"
+{% else %}
+  enable_cluster_autoscaler  = true
+  cluster_autoscaler_version = "{{ addon_cluster_autoscaler_version | default('1.32.0') }}"
+{% endif %}
+
+  # ─── Addon Configuration ────────────────────────────────────────────
+  vpc_cni_config = {
+    enable_prefix_delegation = true
+    warm_prefix_target       = 1
+  }
+
+  coredns_config = {
+    compute_type = "ec2"
+    replicas     = 2
+  }
+
+  tags = {
+    UpgradeFrom = "{{ current_version }}"
+    UpgradeTo   = "{{ target_version }}"
+    Component   = "addons"
+  }
+}

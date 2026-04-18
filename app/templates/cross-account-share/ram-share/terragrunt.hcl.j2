@@ -1,0 +1,31 @@
+# -----------------------------------------------------------------------------
+# Cross-Account Share: {{ share_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Targets: {{ target_account_ids | join(', ') }}
+# Permission: {{ permission_type }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//ram-share?ref={{ iac_template_ref }}"
+}
+
+inputs = {
+  share_name              = "{{ share_name }}"
+  resource_arns           = {{ resource_arns | tojson }}
+  target_account_ids      = {{ target_account_ids | tojson }}
+  permission_type         = "{{ permission_type }}"
+  enable_external_sharing = {{ enable_external_sharing | lower }}
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    ManagedBy   = "keystone"
+    Service     = "cross-account-share"
+    CostCenter  = "{{ cost_center }}"
+    CreatedBy   = "{{ requester_email }}"
+  }
+}

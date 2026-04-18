@@ -1,0 +1,26 @@
+{{ "{{" }}- define "chart.name" -{{ "}}" }}
+{{ "{{" }}- .Chart.Name | trunc 63 | trimSuffix "-" {{ "}}" }}
+{{ "{{" }}- end {{ "}}" }}
+
+{{ "{{" }}- define "chart.fullname" -{{ "}}" }}
+{{ "{{" }}- .Release.Name | trunc 63 | trimSuffix "-" {{ "}}" }}
+{{ "{{" }}- end {{ "}}" }}
+
+{{ "{{" }}- define "chart.labels" -{{ "}}" }}
+helm.sh/chart: {{ "{{" }} include "chart.name" . {{ "}}" }}
+{{ "{{" }} include "chart.selectorLabels" . {{ "}}" }}
+app.kubernetes.io/managed-by: {{ "{{" }} .Release.Service {{ "}}" }}
+{{ "{{" }}- end {{ "}}" }}
+
+{{ "{{" }}- define "chart.selectorLabels" -{{ "}}" }}
+app.kubernetes.io/name: {{ "{{" }} include "chart.name" . {{ "}}" }}
+app.kubernetes.io/instance: {{ "{{" }} .Release.Name {{ "}}" }}
+{{ "{{" }}- end {{ "}}" }}
+
+{{ "{{" }}- define "chart.serviceAccountName" -{{ "}}" }}
+{{ "{{" }}- if .Values.serviceAccount.name {{ "}}" }}
+{{ "{{" }}- .Values.serviceAccount.name {{ "}}" }}
+{{ "{{" }}- else {{ "}}" }}
+{{ "{{" }}- include "chart.fullname" . {{ "}}" }}
+{{ "{{" }}- end {{ "}}" }}
+{{ "{{" }}- end {{ "}}" }}

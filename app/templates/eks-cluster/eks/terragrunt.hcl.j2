@@ -1,0 +1,68 @@
+# -----------------------------------------------------------------------------
+# EKS Cluster: {{ cluster_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//eks?ref={{ iac_template_ref }}"
+}
+
+dependency "vpc" {
+  config_path = "../vpc"
+
+  mock_outputs = {
+    vpc_id             = "vpc-00000000000000000"
+    private_subnet_ids = ["subnet-aaa", "subnet-bbb", "subnet-ccc"]
+    public_subnet_ids  = ["subnet-ddd", "subnet-eee", "subnet-fff"]
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+inputs = {
+  name            = "{{ cluster_name }}"
+  cluster_version = "{{ cluster_version }}"
+
+  vpc_id             = dependency.vpc.outputs.vpc_id
+  private_subnet_ids = dependency.vpc.outputs.private_subnet_ids
+  public_subnet_ids  = dependency.vpc.outputs.public_subnet_ids
+
+  {% if private_cluster %}
+  cluster_endpoint_private_access = true
+  cluster_endpoint_public_access  = false
+  {% else %}
+  cluster_endpoint_private_access = true
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+  {% endif %}
+
+  node_group_defaults = {
+    instance_types = ["{{ node_instance_type }}"]
+    capacity_type  = "ON_DEMAND"
+    disk_size      = 50
+  }
+
+  node_groups = {
+    general = {
+      desired_size   = {{ node_desired_size }}
+      min_size       = {{ node_min_size }}
+      max_size       = {{ node_max_size }}
+      instance_types = ["{{ node_instance_type }}"]
+      labels = {
+        workload = "general"
+        team     = "{{ team_name }}"
+      }
+    }
+  }
+
+  enable_cluster_encryption  = true
+  cluster_log_types          = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  {% if environment == "prod" %}
+  cluster_log_retention_days = 90
+  {% else %}
+  cluster_log_retention_days = 30
+  {% endif %}
+}

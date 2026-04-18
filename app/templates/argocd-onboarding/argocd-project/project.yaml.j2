@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ project_name }}
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "GitOps project for {{ team_name }} — managed by Keystone"
+
+  sourceRepos:
+    - "https://github.com/{{ github_group }}/{{ github_repo }}.git"
+
+  destinations:
+    {% for env in environments %}
+    - namespace: "{{ namespace }}-{{ env }}"
+      server: "{{ cluster_endpoint }}"
+    {% endfor %}
+    - namespace: "{{ namespace }}"
+      server: "{{ cluster_endpoint }}"
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: apps
+      kind: "*"
+    - group: autoscaling
+      kind: "*"
+    - group: policy
+      kind: "*"
+    - group: networking.k8s.io
+      kind: "*"
+
+  roles:
+    - name: admin
+      description: "Full access for {{ team_name }}"
+      policies:
+        - "p, proj:{{ project_name }}:admin, applications, *, {{ project_name }}/*, allow"
+      groups:
+        - "{{ github_group }}"
+    - name: readonly
+      description: "Read-only access"
+      policies:
+        - "p, proj:{{ project_name }}:readonly, applications, get, {{ project_name }}/*, allow"

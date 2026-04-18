@@ -1,0 +1,36 @@
+# -----------------------------------------------------------------------------
+# Lake Formation: {{ data_lake_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Admin: {{ admin_arn }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//lake-formation?ref={{ iac_template_ref }}"
+}
+
+inputs = {
+  data_lake_name = "{{ data_lake_name }}"
+  admin_arn      = "{{ admin_arn }}"
+  s3_locations   = {{ s3_locations | tojson }}
+
+  {% if catalog_id %}
+  catalog_id = "{{ catalog_id }}"
+  {% endif %}
+
+  {% if lf_tags %}
+  lf_tags = {{ lf_tags | tojson }}
+  {% endif %}
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    ManagedBy   = "keystone"
+    Service     = "lake-formation"
+    CostCenter  = "{{ cost_center }}"
+    CreatedBy   = "{{ requester_email }}"
+  }
+}

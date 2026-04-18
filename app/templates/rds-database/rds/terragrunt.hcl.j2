@@ -1,0 +1,103 @@
+# -----------------------------------------------------------------------------
+# RDS Database: {{ db_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Engine: {{ engine }} {{ engine_version }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//rds?ref={{ iac_template_ref }}"
+}
+
+{% if existing_vpc_id %}
+# Using existing shared VPC
+inputs = {
+  name = "{{ db_name }}"
+
+  engine         = "{{ engine }}"
+  engine_version = "{{ engine_version }}"
+  instance_class = "{{ instance_class }}"
+
+  allocated_storage     = {{ allocated_storage }}
+  max_allocated_storage = {{ allocated_storage * 2 }}
+  storage_type          = "gp3"
+
+  database_name = "{{ db_name | replace('-', '_') }}"
+
+  multi_az            = {{ multi_az | lower }}
+  deletion_protection = {{ deletion_protection | lower }}
+
+  backup_retention_period = {{ backup_retention_days }}
+  backup_window           = "03:00-04:00"
+  maintenance_window      = "sun:04:00-sun:05:00"
+
+  vpc_id     = "{{ existing_vpc_id }}"
+
+  # IAM database authentication
+  iam_database_authentication_enabled = true
+
+  # Performance Insights
+  performance_insights_enabled = true
+  {% if environment == "prod" %}
+  performance_insights_retention_period = 731  # 2 years
+  {% else %}
+  performance_insights_retention_period = 7
+  {% endif %}
+
+  # Enhanced Monitoring
+  monitoring_interval = 60
+
+  # SSL
+  parameter_group_parameters = {
+    "rds.force_ssl" = "1"
+  }
+}
+{% else %}
+# Create a new VPC via dependency
+dependency "vpc" {
+  config_path = "../vpc"
+
+  mock_outputs = {
+    vpc_id                 = "vpc-00000000000000000"
+    database_subnet_ids    = ["subnet-aaa", "subnet-bbb", "subnet-ccc"]
+    database_subnet_group_name = "mock-db-subnet-group"
+  }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
+inputs = {
+  name = "{{ db_name }}"
+
+  engine         = "{{ engine }}"
+  engine_version = "{{ engine_version }}"
+  instance_class = "{{ instance_class }}"
+
+  allocated_storage     = {{ allocated_storage }}
+  max_allocated_storage = {{ allocated_storage * 2 }}
+  storage_type          = "gp3"
+
+  database_name = "{{ db_name | replace('-', '_') }}"
+
+  multi_az            = {{ multi_az | lower }}
+  deletion_protection = {{ deletion_protection | lower }}
+
+  backup_retention_period = {{ backup_retention_days }}
+  backup_window           = "03:00-04:00"
+  maintenance_window      = "sun:04:00-sun:05:00"
+
+  vpc_id                     = dependency.vpc.outputs.vpc_id
+  database_subnet_ids        = dependency.vpc.outputs.database_subnet_ids
+  database_subnet_group_name = dependency.vpc.outputs.database_subnet_group_name
+
+  iam_database_authentication_enabled = true
+  performance_insights_enabled = true
+  monitoring_interval = 60
+
+  parameter_group_parameters = {
+    "rds.force_ssl" = "1"
+  }
+}
+{% endif %}

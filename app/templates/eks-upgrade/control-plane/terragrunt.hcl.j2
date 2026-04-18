@@ -1,0 +1,56 @@
+# -----------------------------------------------------------------------------
+# Stage 1: EKS Control Plane Upgrade
+# {{ current_version }} → {{ target_version }}
+# Cluster: {{ cluster_name }}
+#
+# This upgrades the EKS managed control plane (API server, etcd, scheduler,
+# controller-manager). The control plane runs across multiple AZs for HA.
+# AWS handles the zero-downtime upgrade of control plane components.
+#
+# Estimated time: 15-25 minutes
+# Rollback: aws eks update-cluster-version (downgrades not recommended)
+# -----------------------------------------------------------------------------
+
+terraform {
+  source = "git::https://github.com/{{ github_group }}/terraform-aws-eks.git//modules/control-plane?ref=main"
+}
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+dependency "vpc" {
+  config_path = "../../../vpc"
+}
+
+inputs = {
+  # ─── Cluster Identity ────────────────────────────────────────────────
+  cluster_name = "{{ cluster_name }}"
+  cluster_arn  = "{{ cluster_arn | default('') }}"
+
+  # ─── Version Upgrade ─────────────────────────────────────────────────
+  cluster_version = "{{ target_version }}"
+
+  # ─── Network ─────────────────────────────────────────────────────────
+  vpc_id     = dependency.vpc.outputs.vpc_id
+  subnet_ids = dependency.vpc.outputs.private_subnets
+
+  # ─── Control Plane Config ────────────────────────────────────────────
+  cluster_endpoint_private_access = {{ private_cluster | default(true) | lower }}
+  cluster_endpoint_public_access  = {{ (not private_cluster | default(true)) | lower }}
+
+  # ─── Logging ─────────────────────────────────────────────────────────
+  cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  # ─── Encryption ──────────────────────────────────────────────────────
+  cluster_encryption_config = {
+    provider_key_arn = "alias/eks/{{ cluster_name }}"
+    resources        = ["secrets"]
+  }
+
+  tags = {
+    UpgradeFrom = "{{ current_version }}"
+    UpgradeTo   = "{{ target_version }}"
+    UpgradeDate = "{{ upgrade_date | default('auto') }}"
+  }
+}

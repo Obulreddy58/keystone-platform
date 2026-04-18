@@ -1,0 +1,34 @@
+# -----------------------------------------------------------------------------
+# Data Classification: {{ classification_name }} — Auto-generated
+# Jira: {{ jira_ticket_key }}
+# Sensitivity: {{ sensitivity_level }} | Schedule: {{ schedule_frequency }}
+# -----------------------------------------------------------------------------
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+terraform {
+  source = "git::https://github.com/{{ iac_github_org }}/{{ iac_repo_prefix }}.git//macie-classification?ref={{ iac_template_ref }}"
+}
+
+inputs = {
+  classification_name  = "{{ classification_name }}"
+  target_bucket_arns   = {{ target_bucket_arns | tojson }}
+  sensitivity_level    = "{{ sensitivity_level }}"
+  enable_pii_detection = {{ enable_pii_detection | lower }}
+  schedule_frequency   = "{{ schedule_frequency }}"
+
+  {% if notification_email %}
+  notification_email = "{{ notification_email }}"
+  {% endif %}
+
+  tags = {
+    Team        = "{{ team_name }}"
+    Environment = "{{ environment }}"
+    ManagedBy   = "keystone"
+    Service     = "data-classification"
+    CostCenter  = "{{ cost_center }}"
+    CreatedBy   = "{{ requester_email }}"
+  }
+}

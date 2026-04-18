@@ -1,0 +1,86 @@
+# -----------------------------------------------------------------------------
+# Stage 3: Node Group Rolling Upgrade
+# Target K8s version: {{ target_version }}
+# Cluster: {{ cluster_name }}
+# Strategy: {{ upgrade_strategy | default('rolling') }}
+#
+# Performs a zero-downtime rolling upgrade of worker node groups:
+#   1. Cordon a node (mark unschedulable)
+#   2. Drain pods (respecting PDBs + grace periods)
+#   3. Launch new node with updated AMI (K8s {{ target_version }})
+#   4. Wait for new node to be Ready
+#   5. Pods reschedule onto new node
+#   6. Terminate old node
+#   7. Repeat for next node
+#
+# Node-by-node: e.g. 6 nodes → 1 node cordoned + drained at a time,
+# new node created, pods migrate, old node terminated.
+#
+# ⚠️  Run AFTER control-plane and addons stages complete.
+# ⚠️  Ensure kubelet version matches control plane after upgrade.
+#
+# Estimated time: 5-10 min per node (depends on drain time + PDBs)
+# Rollback: revert launch template version → terraform apply
+# -----------------------------------------------------------------------------
+
+terraform {
+  source = "git::https://github.com/{{ github_group }}/terraform-aws-eks.git//modules/node-groups?ref=main"
+}
+
+include "root" {
+  path = find_in_parent_folders()
+}
+
+dependency "eks" {
+  config_path = "../control-plane"
+}
+
+dependency "addons" {
+  config_path = "../addons"
+}
+
+inputs = {
+  cluster_name    = dependency.eks.outputs.cluster_name
+  cluster_version = "{{ target_version }}"
+
+  # ─── Node Group Configuration ─────────────────────────────────────
+  node_groups = {
+    managed = {
+      instance_types = ["{{ node_instance_type | default('m6i.xlarge') }}"]
+      min_size       = {{ node_min_size | default(2) }}
+      max_size       = {{ node_max_size | default(10) }}
+      desired_size   = {{ node_desired_size | default(3) }}
+
+      # AMI is automatically resolved to latest for K8s {{ target_version }}
+      ami_type = "AL2023_x86_64_STANDARD"
+
+      # ── Rolling Update Strategy ──────────────────────────────────
+      update_config = {
+        max_unavailable = {{ node_max_unavailable | default(1) }}
+      }
+
+      labels = {
+        "kubernetes.io/version" = "{{ target_version }}"
+        "node.kubernetes.io/lifecycle" = "normal"
+      }
+    }
+  }
+
+  # ─── Drain Configuration ──────────────────────────────────────────
+  # The EKS managed node group handles drain automatically.
+  # These settings control the behavior:
+  force_update_version = false   # Respect PDBs during drain
+  drain_timeout        = {{ drain_timeout_seconds | default(300) }}
+
+  # ─── Launch Template ──────────────────────────────────────────────
+  # New launch template version is created with updated AMI.
+  # Old nodes are replaced one-by-one via the rolling update strategy.
+  launch_template_version = "$Latest"
+
+  tags = {
+    UpgradeFrom    = "{{ current_version }}"
+    UpgradeTo      = "{{ target_version }}"
+    Component      = "node-groups"
+    UpgradeStrategy = "{{ upgrade_strategy | default('rolling') }}"
+  }
+}

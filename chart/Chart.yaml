@@ -1,0 +1,6 @@
+apiVersion: v2
+name: infra-self-service
+description: Self-Service Infrastructure API — Jira webhook → GitHub PR
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
