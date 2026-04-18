@@ -128,6 +128,111 @@ class GitHubService:
 
     # ─── PR Creation (in team's repo) ────────────────────────────────────────
 
+    def ensure_repo_exists(
+        self,
+        *,
+        github_group: str,
+        github_repo: str,
+    ) -> bool:
+        """
+        Ensure the target repo exists. If not, create it and bootstrap with:
+        - Root terragrunt.hcl (S3 backend config)
+        - GitHub Actions workflows copied from keystone-workflows repo
+
+        Returns True if the repo was just created, False if it already existed.
+        """
+        repo_full = f"{github_group}/{github_repo}"
+        client = self._client()
+
+        # Check if repo already exists
+        try:
+            client.get_repo(repo_full)
+            logger.info("repo_exists", repo=repo_full)
+            return False
+        except GithubException as e:
+            if e.status != 404:
+                raise
+
+        # Repo doesn't exist — create it
+        logger.info("creating_repo", repo=repo_full)
+        user = client.get_user()
+        new_repo = user.create_repo(
+            name=github_repo,
+            description=f"Infrastructure-as-Code repo for {github_group} — managed by Keystone IDP",
+            auto_init=True,
+            private=False,
+        )
+
+        # Bootstrap: root terragrunt.hcl
+        root_tg = (
+            '# Root terragrunt.hcl — Keystone Infra-Live\n'
+            '# Auto-configures S3 backend + DynamoDB locking\n\n'
+            'remote_state {\n'
+            '  backend = "s3"\n'
+            '  generate = {\n'
+            '    path      = "backend.tf"\n'
+            '    if_exists = "overwrite_terragrunt"\n'
+            '  }\n'
+            '  config = {\n'
+            '    bucket         = "keystone-tfstate-${get_aws_account_id()}"\n'
+            '    key            = "${path_relative_to_include()}/terraform.tfstate"\n'
+            '    region         = "eu-central-1"\n'
+            '    encrypt        = true\n'
+            '    dynamodb_table = "keystone-tfstate-lock"\n'
+            '  }\n'
+            '}\n\n'
+            'generate "provider" {\n'
+            '  path      = "provider.tf"\n'
+            '  if_exists = "overwrite_terragrunt"\n'
+            '  contents  = <<EOF\n'
+            'provider "aws" {\n'
+            '  region = "eu-central-1"\n\n'
+            '  default_tags {\n'
+            '    tags = {\n'
+            '      ManagedBy  = "terragrunt"\n'
+            '      Platform   = "keystone"\n'
+            f'      Repository = "{repo_full}"\n'
+            '    }\n'
+            '  }\n'
+            '}\n'
+            'EOF\n'
+            '}\n'
+        )
+        new_repo.create_file(
+            path="terragrunt.hcl",
+            message="chore: bootstrap root terragrunt.hcl with S3 backend",
+            content=root_tg,
+        )
+
+        # Bootstrap: copy workflows from keystone-workflows repo
+        try:
+            workflows_repo = client.get_repo(f"{settings.iac_github_org}/keystone-workflows")
+            workflow_files = [
+                ".github/workflows/pull-request.yaml",
+                ".github/workflows/deploy.yaml",
+                ".github/workflows/destroy.yaml",
+                ".github/workflows/terragrunt-plan.yaml",
+                ".github/workflows/terragrunt-apply.yaml",
+                ".github/workflows/terragrunt-destroy.yaml",
+            ]
+            for wf_path in workflow_files:
+                try:
+                    wf_content = workflows_repo.get_contents(wf_path, ref="main")
+                    decoded = base64.b64decode(wf_content.content).decode("utf-8")
+                    new_repo.create_file(
+                        path=wf_path,
+                        message=f"ci: add {wf_path.split('/')[-1]} from keystone-workflows",
+                        content=decoded,
+                    )
+                    logger.info("workflow_copied", file=wf_path, repo=repo_full)
+                except GithubException:
+                    logger.warning("workflow_copy_failed", file=wf_path, repo=repo_full)
+        except GithubException:
+            logger.warning("workflows_repo_not_found", repo=repo_full)
+
+        logger.info("repo_created_and_bootstrapped", repo=repo_full)
+        return True
+
     def create_pull_request(
         self,
         *,

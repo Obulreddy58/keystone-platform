@@ -702,6 +702,15 @@
               <template x-if="detail.pr_url">
                 <a :href="detail.pr_url" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 mt-3 text-sm text-blue-600 hover:underline">&#x1F4CE; View Pull Request &rarr;</a>
               </template>
+              <template x-if="!detail.pr_url && detail.error_message">
+                <div class="mt-3">
+                  <p class="text-sm text-red-600 mb-2" x-text="detail.error_message"></p>
+                  <button @click="retryRequest(detail.jira_ticket_key)" :disabled="submitting" class="px-4 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 disabled:opacity-50 transition">
+                    <span x-show="!submitting">&#x1F504; Retry PR Creation</span>
+                    <span x-show="submitting">Retrying...</span>
+                  </button>
+                </div>
+              </template>
             </div>
 
             <!-- Request Config -->
@@ -1599,6 +1608,22 @@ function app() {
         this.detail = await this.authFetch('/api/requests/' + encodeURIComponent(key)).then(r => r.json());
         this.page = 'detail';
       } catch(e) { console.error(e); }
+    },
+    async retryRequest(key) {
+      this.submitting = true;
+      try {
+        var r = await this.authFetch('/api/requests/' + encodeURIComponent(key) + '/retry', { method: 'POST' });
+        if (r.ok) {
+          this.detail = await r.json();
+          this.addToast('PR Created', 'Pull request created successfully for ' + key, 'success');
+        } else {
+          var e = await r.json();
+          this.addToast('Retry Failed', e.detail || 'Unknown error', 'error');
+          // Reload to show updated error in timeline
+          await this.viewRequest(key);
+        }
+      } catch(e) { this.addToast('Error', 'Connection error', 'error'); }
+      finally { this.submitting = false; }
     },
 
     // -- Catalog --
