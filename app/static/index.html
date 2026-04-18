@@ -1415,7 +1415,9 @@ function app() {
       options = options || {};
       if (!options.headers) options.headers = {};
       if (this.token) options.headers['Authorization'] = 'Bearer ' + this.token;
-      return fetch(url, options);
+      var resp = await fetch(url, options);
+      if (resp.status === 401) { this.logout(); }
+      return resp;
     },
 
     // -- Auth Methods --
