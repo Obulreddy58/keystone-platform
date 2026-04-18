@@ -151,12 +151,12 @@ async def create_request(
             render_error = f"PR creation failed: {e}"
             logger.error("pr_failed", error=str(e), ticket=ticket_key)
 
-    # 3. Save to DB
+    # 4. Save to DB — status is PLAN_RUNNING when PR created (workflow runs plan then auto-merges)
     file_paths = sorted(rendered_files.keys()) if rendered_files else []
     record = InfraRequestRecord(
         jira_ticket_key=ticket_key,
         request_type=request_type,
-        status=RequestStatus.PENDING,
+        status=RequestStatus.PLAN_RUNNING if pr_url else RequestStatus.PENDING,
         requester_email=validated.requester_email,
         team_name=validated.team_name,
         cost_center=validated.cost_center,
@@ -179,7 +179,7 @@ async def create_request(
         request_id=0,
         event_type="pr_created" if pr_url else "created",
         description=(
-            f"PR created in {target_github_group}/{target_github_repo}: {pr_url}"
+            f"PR created in {target_github_group}/{target_github_repo}: {pr_url} — plan running, will auto-merge on success"
             if pr_url
             else f"{request_type} request created — {render_error or 'pending template rendering'}"
         ),
@@ -378,6 +378,7 @@ async def retry_request(
 
     record.pr_url = pr_url
     record.pr_number = pr_number
+    record.status = RequestStatus.PLAN_RUNNING
     record.error_message = None
     record.files_created = len(rendered_files)
     record.file_paths = sorted(rendered_files.keys())
@@ -385,7 +386,7 @@ async def retry_request(
     event = RequestEvent(
         request_id=record.id,
         event_type="pr_created",
-        description=f"PR created (retry) in {target_github_group}/{target_github_repo}: {pr_url}",
+        description=f"PR created (retry) in {target_github_group}/{target_github_repo}: {pr_url} — plan running, will auto-merge on success",
         metadata_json={"pr_url": pr_url, "retry": True},
     )
     db.add(event)

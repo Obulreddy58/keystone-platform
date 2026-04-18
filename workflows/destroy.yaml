@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Destroy — Manual Terragrunt Destroy
+# Must be triggered manually via GitHub Actions UI.
+# User specifies the working directory to destroy.
+# ---------------------------------------------------------------------------
+name: "Destroy — Teardown"
+
+on:
+  workflow_dispatch:
+    inputs:
+      working_directory:
+        description: "Path to destroy (e.g. platform/prod/eu-central-1/vpc/my-vpc)"
+        required: true
+        type: string
+      environment:
+        description: "Environment (e.g. dev, prod)"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      confirm_destroy:
+        description: "Type the environment name to confirm destruction"
+        required: true
+        type: string
+
+concurrency:
+  group: destroy-${{ github.event.inputs.working_directory }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    name: "Destroy: ${{ github.event.inputs.working_directory }}"
+    uses: Obulreddy58/keystone-workflows/.github/workflows/terragrunt-destroy.yaml@main
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      working_directory: ${{ github.event.inputs.working_directory }}
+      confirm_environment: ${{ github.event.inputs.confirm_destroy }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}

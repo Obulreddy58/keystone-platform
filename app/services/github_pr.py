@@ -12,6 +12,7 @@ Architecture:
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 import structlog
 from github import Auth, Github, GithubException
@@ -135,8 +136,8 @@ class GitHubService:
         github_repo: str,
     ) -> bool:
         """
-        Ensure the target repo exists. If not, create it and bootstrap with:
-        - Root terragrunt.hcl (S3 backend config)
+        Ensure the target repo exists and is properly bootstrapped with:
+        - Root terragrunt.hcl (S3 backend + provider with assume_role)
         - GitHub Actions workflows copied from keystone-workflows repo
 
         Returns True if the repo was just created, False if it already existed.
@@ -145,13 +146,18 @@ class GitHubService:
         client = self._client()
 
         # Check if repo already exists
+        existing_repo = None
         try:
-            client.get_repo(repo_full)
+            existing_repo = client.get_repo(repo_full)
             logger.info("repo_exists", repo=repo_full)
-            return False
         except GithubException as e:
             if e.status != 404:
                 raise
+
+        if existing_repo:
+            # Repo exists — verify bootstrap files are present
+            self._ensure_bootstrap_files(existing_repo, repo_full)
+            return False
 
         # Repo doesn't exist — create it
         logger.info("creating_repo", repo=repo_full)
@@ -163,10 +169,47 @@ class GitHubService:
             private=False,
         )
 
-        # Bootstrap: root terragrunt.hcl
+        self._bootstrap_repo(new_repo, repo_full)
+        logger.info("repo_created_and_bootstrapped", repo=repo_full)
+        return True
+
+    def _ensure_bootstrap_files(self, repo, repo_full: str) -> None:
+        """Check if root terragrunt.hcl exists; if not, create it."""
+        try:
+            repo.get_contents("terragrunt.hcl")
+        except GithubException as e:
+            if e.status == 404:
+                logger.info("bootstrap_missing", repo=repo_full)
+                self._bootstrap_repo(repo, repo_full)
+            else:
+                raise
+
+    def _bootstrap_repo(self, repo, repo_full: str) -> None:
+        """Bootstrap a repo with root terragrunt.hcl + GitHub Actions workflows."""
         root_tg = (
             '# Root terragrunt.hcl — Keystone Infra-Live\n'
-            '# Auto-configures S3 backend + DynamoDB locking\n\n'
+            '# Reads account.hcl / env.hcl / region.hcl from the directory hierarchy\n'
+            '# and auto-configures S3 backend, provider, and assume_role.\n'
+            '#\n'
+            '# Directory layout:\n'
+            '#   terragrunt.hcl           <- this file\n'
+            '#   {team}/account.hcl       <- account_id, account_name\n'
+            '#   {team}/{env}/env.hcl     <- environment\n'
+            '#   {team}/{env}/{region}/region.hcl <- aws_region\n'
+            '#   {team}/{env}/{region}/{module}/{resource}/terragrunt.hcl <- module\n'
+            '\n'
+            'locals {\n'
+            '  account_vars = read_terragrunt_config(find_in_parent_folders("account.hcl"))\n'
+            '  env_vars     = read_terragrunt_config(find_in_parent_folders("env.hcl"))\n'
+            '  region_vars  = read_terragrunt_config(find_in_parent_folders("region.hcl"))\n'
+            '\n'
+            '  account_id   = local.account_vars.locals.account_id\n'
+            '  account_name = local.account_vars.locals.account_name\n'
+            '  environment  = local.env_vars.locals.environment\n'
+            '  aws_region   = local.region_vars.locals.aws_region\n'
+            '}\n'
+            '\n'
+            '# S3 backend — one state bucket per AWS account\n'
             'remote_state {\n'
             '  backend = "s3"\n'
             '  generate = {\n'
@@ -174,61 +217,85 @@ class GitHubService:
             '    if_exists = "overwrite_terragrunt"\n'
             '  }\n'
             '  config = {\n'
-            '    bucket         = "keystone-tfstate-${get_aws_account_id()}"\n'
+            '    bucket         = "keystone-tfstate-${local.account_id}"\n'
             '    key            = "${path_relative_to_include()}/terraform.tfstate"\n'
-            '    region         = "eu-central-1"\n'
+            '    region         = local.aws_region\n'
             '    encrypt        = true\n'
             '    dynamodb_table = "keystone-tfstate-lock"\n'
             '  }\n'
-            '}\n\n'
+            '}\n'
+            '\n'
+            '# AWS provider — assumes role into the target account\n'
             'generate "provider" {\n'
             '  path      = "provider.tf"\n'
             '  if_exists = "overwrite_terragrunt"\n'
             '  contents  = <<EOF\n'
             'provider "aws" {\n'
-            '  region = "eu-central-1"\n\n'
+            '  region = "${local.aws_region}"\n'
+            '\n'
+            '  assume_role {\n'
+            '    role_arn = "arn:aws:iam::${local.account_id}:role/GithubActionsRole"\n'
+            '  }\n'
+            '\n'
             '  default_tags {\n'
             '    tags = {\n'
-            '      ManagedBy  = "terragrunt"\n'
-            '      Platform   = "keystone"\n'
-            f'      Repository = "{repo_full}"\n'
+            '      ManagedBy   = "terragrunt"\n'
+            '      Platform    = "keystone"\n'
+            '      Environment = "${local.environment}"\n'
+            '      Account     = "${local.account_name}"\n'
+            f'      Repository  = "{repo_full}"\n'
             '    }\n'
             '  }\n'
             '}\n'
             'EOF\n'
             '}\n'
         )
-        new_repo.create_file(
-            path="terragrunt.hcl",
-            message="chore: bootstrap root terragrunt.hcl with S3 backend",
-            content=root_tg,
-        )
 
-        # Bootstrap: copy workflows from keystone-workflows repo
+        # Create or update root terragrunt.hcl
         try:
-            workflows_repo = client.get_repo(f"{settings.iac_github_org}/keystone-workflows")
-            workflow_files = [
-                ".github/workflows/pull-request.yaml",
-                ".github/workflows/deploy.yaml",
-                ".github/workflows/destroy.yaml",
-                ".github/workflows/terragrunt-plan.yaml",
-                ".github/workflows/terragrunt-apply.yaml",
-                ".github/workflows/terragrunt-destroy.yaml",
-            ]
-            for wf_path in workflow_files:
-                try:
-                    wf_content = workflows_repo.get_contents(wf_path, ref="main")
-                    decoded = base64.b64decode(wf_content.content).decode("utf-8")
-                    new_repo.create_file(
-                        path=wf_path,
-                        message=f"ci: add {wf_path.split('/')[-1]} from keystone-workflows",
-                        content=decoded,
-                    )
-                    logger.info("workflow_copied", file=wf_path, repo=repo_full)
-                except GithubException:
-                    logger.warning("workflow_copy_failed", file=wf_path, repo=repo_full)
-        except GithubException:
-            logger.warning("workflows_repo_not_found", repo=repo_full)
+            existing = repo.get_contents("terragrunt.hcl")
+            repo.update_file(
+                path="terragrunt.hcl",
+                message="chore: update root terragrunt.hcl with account hierarchy",
+                content=root_tg,
+                sha=existing.sha,
+            )
+        except GithubException as e:
+            if e.status == 404:
+                repo.create_file(
+                    path="terragrunt.hcl",
+                    message="chore: bootstrap root terragrunt.hcl with S3 backend + assume_role",
+                    content=root_tg,
+                )
+            else:
+                raise
+
+        # Copy the 3 caller workflows (they invoke reusable workflows from central repo)
+        workflows_dir = Path(__file__).parent.parent.parent / "workflows"
+        caller_files = [
+            "pull-request.yaml",
+            "deploy.yaml",
+            "destroy.yaml",
+        ]
+        for wf_name in caller_files:
+            wf_local = workflows_dir / wf_name
+            wf_path = f".github/workflows/{wf_name}"
+            try:
+                # Skip if already exists
+                repo.get_contents(wf_path)
+                continue
+            except GithubException:
+                pass
+            try:
+                content = wf_local.read_text(encoding="utf-8")
+                repo.create_file(
+                    path=wf_path,
+                    message=f"ci: add {wf_name} (calls keystone-workflows)",
+                    content=content,
+                )
+                logger.info("workflow_added", file=wf_path, repo=repo_full)
+            except Exception as e:
+                logger.warning("workflow_add_failed", file=wf_path, error=str(e), repo=repo_full)
 
         logger.info("repo_created_and_bootstrapped", repo=repo_full)
         return True
@@ -328,6 +395,9 @@ class GitHubService:
                 logger.warning("labels_failed", labels=labels, repo=repo_full_name)
 
         logger.info("pr_created", pr_url=pr.html_url, repo=repo_full_name)
+
+        # Auto-merge is handled by the pull-request.yaml workflow:
+        # PR created → plan runs → plan succeeds → workflow auto-merges → deploy runs
         return pr.html_url
 
 

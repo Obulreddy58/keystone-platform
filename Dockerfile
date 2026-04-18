@@ -9,6 +9,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY app/ app/
 
+# Copy workflow templates (used to bootstrap team repos)
+COPY workflows/ workflows/
+
 # Non-root user
 RUN adduser --disabled-password --gecos "" appuser
 USER appuser

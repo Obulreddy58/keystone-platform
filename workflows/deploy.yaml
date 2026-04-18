@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------------------
+# Deploy — Terragrunt Apply on merge to main
+# Fires when a PR is merged. Detects changed dirs,
+# calls central reusable apply workflow.
+# ---------------------------------------------------------------------------
+name: "Deploy — Apply"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.hcl"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------
+  # Detect which dirs changed in the merge commit
+  # ---------------------------------------------------------------
+  detect-changes:
+    name: Detect Changed Dirs
+    runs-on: ubuntu-latest
+    outputs:
+      working_dirs: ${{ steps.dirs.outputs.dirs }}
+      environment: ${{ steps.dirs.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Find changed terragrunt module dirs
+        id: dirs
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD -- '*.hcl' \
+            | grep -E '^[^/]+/[^/]+/[^/]+/[^/]+/' \
+            | xargs -I{} dirname {} \
+            | sort -u)
+
+          if [ -z "$CHANGED" ]; then
+            echo "No terragrunt module dirs changed"
+            echo 'dirs=[]' >> $GITHUB_OUTPUT
+            echo 'environment=' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          ENV=$(echo "$CHANGED" | head -1 | cut -d'/' -f2)
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+          JSON="["
+          FIRST=true
+          for d in $CHANGED; do
+            if [ "$FIRST" = true ]; then FIRST=false; else JSON="$JSON,"; fi
+            JSON="$JSON\"$d\""
+          done
+          JSON="$JSON]"
+          echo "dirs=$JSON" >> $GITHUB_OUTPUT
+          echo "Changed dirs: $JSON"
+
+  # ---------------------------------------------------------------
+  # Run Terragrunt Apply via central reusable workflow
+  # ---------------------------------------------------------------
+  apply:
+    name: "Apply: ${{ matrix.dir }}"
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.working_dirs != '[]'
+    strategy:
+      matrix:
+        dir: ${{ fromJson(needs.detect-changes.outputs.working_dirs) }}
+      fail-fast: false
+    concurrency:
+      group: deploy-${{ matrix.dir }}
+      cancel-in-progress: false
+    uses: Obulreddy58/keystone-workflows/.github/workflows/terragrunt-apply.yaml@main
+    with:
+      environment: ${{ needs.detect-changes.outputs.environment }}
+      working_directory: ${{ matrix.dir }}
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
