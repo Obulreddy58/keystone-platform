@@ -1,0 +1,141 @@
+# ---------------------------------------------------------------------------
+# Reusable Workflow: Terragrunt Plan (for infra-live repos)
+#
+# Called by team repos' pull-request.yaml.
+# Runs terragrunt plan in the specified working directory.
+# Posts plan output as a PR comment.
+#
+# No local modules/ validation — modules are sourced remotely
+# from keystone-modules via git references in terragrunt.hcl.
+# ---------------------------------------------------------------------------
+name: Terragrunt Plan
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (e.g. prod, dev)"
+        required: true
+        type: string
+      working_directory:
+        description: "Path to the terragrunt module dir (e.g. platform/prod/eu-central-1/vpc/my-vpc)"
+        required: true
+        type: string
+      terraform_version:
+        description: "Terraform version"
+        required: false
+        type: string
+        default: "1.10.0"
+      terragrunt_version:
+        description: "Terragrunt version"
+        required: false
+        type: string
+        default: "0.67.0"
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_INPUT: "false"
+  TF_IN_AUTOMATION: "true"
+  TERRAGRUNT_NON_INTERACTIVE: "true"
+
+jobs:
+  plan:
+    name: Terragrunt Plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: tg-plan-${{ inputs.environment }}
+          aws-region: eu-central-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: ${{ inputs.terragrunt_version }}
+
+      - name: Terragrunt Init
+        working-directory: ${{ inputs.working_directory }}
+        run: terragrunt init --terragrunt-non-interactive
+
+      - name: Terragrunt Plan
+        id: plan
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terragrunt plan -no-color --terragrunt-non-interactive 2>&1 | tee plan_output.txt
+          echo "plan_exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('${{ inputs.working_directory }}/plan_output.txt', 'utf8');
+
+            const MAX_LEN = 60000;
+            if (plan.length > MAX_LEN) {
+              plan = plan.substring(0, MAX_LEN) + '\n\n... (truncated)';
+            }
+
+            const body = `### Terragrunt Plan — \`${{ inputs.working_directory }}\` (\`${{ inputs.environment }}\`)
+
+            <details>
+            <summary>Show Plan Output</summary>
+
+            \`\`\`
+            ${plan}
+            \`\`\`
+
+            </details>
+
+            **Pushed by:** @${{ github.actor }}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const marker = `Terragrunt Plan — \`${{ inputs.working_directory }}\``;
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes(marker)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+
+      - name: Fail if plan failed
+        if: steps.plan.outputs.plan_exit_code != '0'
+        run: exit 1

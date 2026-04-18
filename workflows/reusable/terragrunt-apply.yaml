@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+# Reusable Workflow: Terragrunt Apply (for infra-live repos)
+#
+# Called by team repos' deploy.yaml on merge to main.
+# Runs terragrunt apply in the specified working directory.
+#
+# No local modules/ scanning — modules are sourced remotely
+# from keystone-modules via git references in terragrunt.hcl.
+# ---------------------------------------------------------------------------
+name: Terragrunt Apply
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (e.g. prod, dev)"
+        required: true
+        type: string
+      working_directory:
+        description: "Path to the terragrunt module dir"
+        required: true
+        type: string
+      terraform_version:
+        description: "Terraform version"
+        required: false
+        type: string
+        default: "1.10.0"
+      terragrunt_version:
+        description: "Terragrunt version"
+        required: false
+        type: string
+        default: "0.67.0"
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_INPUT: "false"
+  TF_IN_AUTOMATION: "true"
+  TERRAGRUNT_NON_INTERACTIVE: "true"
+
+jobs:
+  apply:
+    name: Terragrunt Apply
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: tg-apply-${{ inputs.environment }}
+          aws-region: eu-central-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Setup Terragrunt
+        uses: autero1/action-terragrunt@v3
+        with:
+          terragrunt-version: ${{ inputs.terragrunt_version }}
+
+      - name: Terragrunt Init
+        working-directory: ${{ inputs.working_directory }}
+        run: terragrunt init --terragrunt-non-interactive
+
+      - name: Terragrunt Apply
+        working-directory: ${{ inputs.working_directory }}
+        run: terragrunt apply --terragrunt-non-interactive
