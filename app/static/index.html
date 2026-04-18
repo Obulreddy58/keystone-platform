@@ -1608,7 +1608,7 @@ function app() {
     },
 
     // -- Request Form --
-    openRequestForm(type) {
+    async openRequestForm(type) {
       if (type === 'eks-upgrade') { this.navigate('eks-upgrade'); return; }
       this.selectedType = type;
       this.formError = ''; this.formSuccess = null;
